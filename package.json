@@ -1,0 +1,19 @@
+{
+  "name": "horse-backend",
+  "version": "1.0.0",
+  "description": "باك اند تطبيق العاديات - عرض وبيع الخيل",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bonjour": "^3.5.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "swagger-ui-express": "^5.0.0"
+  }
+}

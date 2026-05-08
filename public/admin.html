@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>لوحة إدارة العاديات</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { sans: ['Tajawal', 'sans-serif'] } } }
+    };
+  </script>
+  <style>
+    body { font-family: 'Tajawal', sans-serif; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .stat-card { transition: transform 0.2s; }
+    .stat-card:hover { transform: translateY(-2px); }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 0.75rem 1rem; text-align: right; border-bottom: 1px solid #e5e7eb; }
+    th { background: #f9fafb; font-weight: 700; color: #374151; }
+    tr:hover { background: #f9fafb; }
+    .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+    .badge-success { background: #d1fae5; color: #065f46; }
+    .badge-warning { background: #fef3c7; color: #92400e; }
+    .badge-info { background: #dbeafe; color: #1e40af; }
+    .link { color: #2563eb; text-decoration: underline; }
+    .json-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <!-- شاشة دخول الإدارة -->
+  <div id="login-screen" class="fixed inset-0 bg-slate-900 flex items-center justify-center z-50" style="display: none;">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+      <h2 class="text-2xl font-bold text-slate-800 mb-2">دخول الإدارة</h2>
+      <p class="text-slate-500 text-sm mb-6">أدخل كلمة سر الإدارة للوصول إلى الصلاحيات الكاملة (حذف، تعديل).</p>
+      <input type="password" id="admin-key-input" placeholder="كلمة سر الإدارة" class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 mb-4" autocomplete="current-password" />
+      <p id="login-error" class="text-red-600 text-sm mb-2 hidden"></p>
+      <button id="btn-login" class="w-full py-3 bg-amber-600 hover:bg-amber-700 rounded-lg text-white font-bold">دخول</button>
+      <p class="text-slate-400 text-xs mt-4">الافتراضي للتطوير: admin123</p>
+    </div>
+  </div>
+
+  <div id="dashboard-wrap" class="flex">
+    <!-- Sidebar -->
+    <aside class="w-64 min-h-screen bg-slate-800 text-white shadow-xl fixed top-0 right-0 z-10">
+      <div class="p-6 border-b border-slate-700">
+        <h1 class="text-xl font-bold">لوحة الإدارة</h1>
+        <p class="text-slate-400 text-sm mt-1">تطبيق العاديات</p>
+        <button id="btn-logout" class="mt-2 text-sm text-amber-400 hover:text-amber-300">تسجيل خروج</button>
+      </div>
+      <nav class="p-4 space-y-1">
+        <button data-tab="users" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">👤</span>
+          <span>المستخدمون</span>
+          <span id="count-users" class="mr-auto badge badge-info">0</span>
+        </button>
+        <button data-tab="horses" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">🐴</span>
+          <span>الخيل</span>
+          <span id="count-horses" class="mr-auto badge badge-info">0</span>
+        </button>
+        <button data-tab="videos" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">🎬</span>
+          <span>الفيديوهات</span>
+          <span id="count-videos" class="mr-auto badge badge-info">0</span>
+        </button>
+        <button data-tab="comments" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">💬</span>
+          <span>التعليقات</span>
+          <span id="count-comments" class="mr-auto badge badge-info">0</span>
+        </button>
+        <button data-tab="favorites" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">⭐</span>
+          <span>المفضلة</span>
+          <span id="count-favorites" class="mr-auto badge badge-info">0</span>
+        </button>
+        <button data-tab="bookings" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">📅</span>
+          <span>الحجوزات</span>
+          <span id="count-bookings" class="mr-auto badge badge-info">0</span>
+        </button>
+        <button data-tab="services" class="sidebar-btn w-full text-right px-4 py-3 rounded-lg hover:bg-slate-700 flex items-center gap-3">
+          <span class="text-2xl">🛠</span>
+          <span>الخدمات</span>
+          <span id="count-services" class="mr-auto badge badge-info">0</span>
+        </button>
+      </nav>
+      <div class="absolute bottom-4 right-4 left-4 p-4 bg-slate-700/50 rounded-lg text-sm text-slate-400">
+        <p>آخر تحديث: <span id="last-update">--</span></p>
+        <button id="btn-refresh" class="mt-2 w-full py-2 bg-amber-600 hover:bg-amber-700 rounded-lg text-white font-medium">تحديث البيانات</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 mr-64 p-8">
+      <header class="mb-8">
+        <h2 class="text-2xl font-bold text-slate-800" id="page-title">نظرة عامة</h2>
+        <p class="text-slate-600 mt-1" id="page-desc">اختر قسمًا من القائمة</p>
+      </header>
+
+      <!-- Stats Overview (shown on load) -->
+      <div id="stats-overview" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="stat-card bg-white rounded-xl shadow p-6 border border-slate-200">
+          <p class="text-slate-500 text-sm">المستخدمون</p>
+          <p class="text-2xl font-bold text-slate-800" id="stat-users">0</p>
+        </div>
+        <div class="stat-card bg-white rounded-xl shadow p-6 border border-slate-200">
+          <p class="text-slate-500 text-sm">الخيل</p>
+          <p class="text-2xl font-bold text-slate-800" id="stat-horses">0</p>
+        </div>
+        <div class="stat-card bg-white rounded-xl shadow p-6 border border-slate-200">
+          <p class="text-slate-500 text-sm">الفيديوهات</p>
+          <p class="text-2xl font-bold text-slate-800" id="stat-videos">0</p>
+        </div>
+        <div class="stat-card bg-white rounded-xl shadow p-6 border border-slate-200">
+          <p class="text-slate-500 text-sm">التعليقات</p>
+          <p class="text-2xl font-bold text-slate-800" id="stat-comments">0</p>
+        </div>
+      </div>
+
+      <!-- Search (per section) -->
+      <div id="search-box" class="mb-4 hidden">
+        <input type="text" id="search-input" placeholder="بحث..." class="w-full max-w-md px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500" />
+      </div>
+
+      <!-- Tab contents -->
+      <div id="content-users" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-users"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="content-horses" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-horses"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="content-videos" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-videos"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="content-comments" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-comments"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="content-favorites" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-favorites"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="content-bookings" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-bookings"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div id="content-services" class="tab-content">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="overflow-x-auto">
+            <table id="table-services"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    let DATA = {};
+    let currentTab = null;
+    let currentRows = [];
+
+    async function loadData() {
+      const key = sessionStorage.getItem('adminKey');
+      if (!key) { showLogin(); return; }
+      try {
+        const res = await fetch('/admin/data', { headers: getAdminHeaders() });
+        if (res.status === 403) { sessionStorage.removeItem('adminKey'); showLogin(); return; }
+        if (!res.ok) throw new Error(res.statusText);
+        DATA = await res.json();
+        document.getElementById('last-update').textContent = new Date().toLocaleTimeString('ar-SA');
+        renderCounts();
+        renderStats();
+        renderAllTables();
+      } catch (e) {
+        document.getElementById('last-update').textContent = 'خطأ: ' + e.message;
+        alert('فشل تحميل البيانات. تأكد أن الباك اند يعمل على المنفذ 4000.');
+      }
+    }
+
+    function showLogin() {
+      document.getElementById('login-screen').style.display = 'flex';
+      document.getElementById('dashboard-wrap').style.display = 'none';
+    }
+    function hideLogin() {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('dashboard-wrap').style.display = 'flex';
+    }
+
+    async function adminDelete(url) {
+      if (!confirm('هل أنت متأكد من الحذف؟')) return;
+      const res = await fetch(url, { method: 'DELETE', headers: getAdminHeaders() });
+      if (res.status === 403) { sessionStorage.removeItem('adminKey'); showLogin(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { loadData(); return; }
+      alert(data.message || 'فشل الحذف');
+    }
+
+    function objToArr(obj) {
+      if (!obj || typeof obj !== 'object') return [];
+      return Object.keys(obj).map(k => ({ id: k, ...(typeof obj[k] === 'object' && obj[k] !== null ? obj[k] : { value: obj[k] }) }));
+    }
+
+    function renderCounts() {
+      const users = objToArr(DATA.users).length;
+      const horses = objToArr(DATA.horses).length;
+      const videos = objToArr(DATA.videos).length;
+      let comments = 0;
+      if (DATA.videoComments && typeof DATA.videoComments === 'object')
+        Object.values(DATA.videoComments).forEach(arr => { if (Array.isArray(arr)) comments += arr.length; });
+      const favorites = objToArr(DATA.favorites).length;
+      const bookings = objToArr(DATA.bookings).length;
+      const services = objToArr(DATA.services).length;
+
+      document.getElementById('count-users').textContent = users;
+      document.getElementById('count-horses').textContent = horses;
+      document.getElementById('count-videos').textContent = videos;
+      document.getElementById('count-comments').textContent = comments;
+      document.getElementById('count-favorites').textContent = favorites;
+      document.getElementById('count-bookings').textContent = bookings;
+      document.getElementById('count-services').textContent = services;
+    }
+
+    function renderStats() {
+      document.getElementById('stat-users').textContent = objToArr(DATA.users).length;
+      document.getElementById('stat-horses').textContent = objToArr(DATA.horses).length;
+      document.getElementById('stat-videos').textContent = objToArr(DATA.videos).length;
+      let comments = 0;
+      if (DATA.videoComments && typeof DATA.videoComments === 'object')
+        Object.values(DATA.videoComments).forEach(arr => { if (Array.isArray(arr)) comments += arr.length; });
+      document.getElementById('stat-comments').textContent = comments;
+    }
+
+    function escapeHtml(s) {
+      if (s == null) return '';
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function formatDate(s) {
+      if (!s) return '—';
+      try {
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? s : d.toLocaleDateString('ar-SA') + ' ' + d.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+      } catch (_) { return s; }
+    }
+
+    function getAdminHeaders() {
+      return { 'X-Admin-Key': sessionStorage.getItem('adminKey') || '' };
+    }
+
+    function renderTable(tableId, headers, rows, rowFn, withActions) {
+      const table = document.getElementById(tableId);
+      const thead = table.querySelector('thead');
+      const tbody = table.querySelector('tbody');
+      const h = withActions ? [...headers, 'إجراءات'] : headers;
+      thead.innerHTML = '<tr>' + h.map(x => `<th>${escapeHtml(x)}</th>`).join('') + '</tr>';
+      currentRows = rows;
+      tbody.innerHTML = rows.map(rowFn).join('');
+    }
+
+    function renderAllTables() {
+      const users = objToArr(DATA.users);
+      renderTable('table-users', ['المعرف', 'الاسم', 'البريد', 'نوع المستخدم', 'تاريخ الإنشاء'], users, u => `
+        <tr>
+          <td class="font-mono text-sm">${escapeHtml((u.id || '').slice(0, 16))}…</td>
+          <td>${escapeHtml(u.name || '—')}</td>
+          <td>${escapeHtml(u.email || '—')}</td>
+          <td><span class="badge badge-info">${escapeHtml(u.userType || '—')}</span></td>
+          <td>${formatDate(u.createdAt)}</td>
+          <td><button onclick="adminDelete('/admin/users/${escapeHtml(u.id || '')}')" class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">حذف</button></td>
+        </tr>
+      `, true);
+
+      const horses = objToArr(DATA.horses);
+      renderTable('table-horses', ['الاسم', 'النوع', 'العمر', 'الجنس', 'السعر', 'المدينة', 'المالك'], horses, h => `
+        <tr>
+          <td>${escapeHtml(h.name || '—')}</td>
+          <td>${escapeHtml(h.type || '—')}</td>
+          <td>${h.age ?? '—'}</td>
+          <td>${h.gender === 'male' ? 'ذكر' : h.gender === 'female' ? 'أنثى' : (h.gender || '—')}</td>
+          <td>${typeof h.price === 'number' ? h.price.toLocaleString('ar-SA') + ' ريال' : (h.price || '—')}</td>
+          <td>${escapeHtml(h.city || '—')}</td>
+          <td class="font-mono text-sm">${escapeHtml((h.ownerId || '').slice(0, 12))}…</td>
+          <td><button onclick="adminDelete('/admin/horses/${escapeHtml(h.id || '')}')" class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">حذف</button></td>
+        </tr>
+      `, true);
+
+      const videos = objToArr(DATA.videos);
+      renderTable('table-videos', ['المعرف', 'النوع', 'المشاهدات', 'الإعجابات', 'التعليقات'], videos, v => `
+        <tr>
+          <td class="font-mono text-sm">${escapeHtml((v.id || '').slice(0, 16))}…</td>
+          <td>${escapeHtml(v.type || '—')}</td>
+          <td>${v.views ?? 0}</td>
+          <td>${v.likes ?? 0}</td>
+          <td>${v.comments ?? 0}</td>
+          <td><button onclick="adminDelete('/admin/videos/${escapeHtml(v.id || '')}')" class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">حذف</button></td>
+        </tr>
+      `, true);
+
+      const commentsList = [];
+      if (DATA.videoComments && typeof DATA.videoComments === 'object') {
+        Object.entries(DATA.videoComments).forEach(([videoId, arr]) => {
+          if (Array.isArray(arr)) arr.forEach(c => commentsList.push({ ...c, videoId }));
+        });
+      }
+      renderTable('table-comments', ['الفيديو', 'المستخدم', 'النص', 'التاريخ'], commentsList, c => `
+        <tr>
+          <td class="font-mono text-sm">${escapeHtml((c.videoId || '').slice(0, 12))}…</td>
+          <td class="font-mono text-sm">${escapeHtml((c.userId || '').slice(0, 12))}…</td>
+          <td class="json-cell" title="${escapeHtml(c.text || '')}">${escapeHtml((c.text || '—').slice(0, 40))}${(c.text || '').length > 40 ? '…' : ''}</td>
+          <td>${formatDate(c.createdAt)}</td>
+          <td><button onclick="adminDelete('/admin/videos/${escapeHtml(c.videoId || '')}/comments/${escapeHtml(c.id || '')}')" class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">حذف</button></td>
+        </tr>
+      `, true);
+
+      const favs = objToArr(DATA.favorites);
+      renderTable('table-favorites', ['المستخدم', 'عدد الخيل المفضلة', 'المعرفات'], favs, f => {
+        const ids = (f.horseIds || f.horse_ids || []).slice(0, 3);
+        return `<tr>
+          <td class="font-mono text-sm">${escapeHtml((f.userId || f.id || '').slice(0, 16))}…</td>
+          <td>${(f.horseIds || f.horse_ids || []).length}</td>
+          <td class="font-mono text-xs">${ids.map(i => escapeHtml(i)).join(', ')}${(f.horseIds || f.horse_ids || []).length > 3 ? '…' : ''}</td>
+        </tr>`;
+      }, false);
+
+      const bookings = objToArr(DATA.bookings);
+      renderTable('table-bookings', ['المعرف', 'الحالة', 'التاريخ'], bookings.slice(0, 50), b => `
+        <tr>
+          <td class="font-mono text-sm">${escapeHtml(String(b.id || '').slice(0, 16))}</td>
+          <td><span class="badge badge-warning">${escapeHtml(b.status || '—')}</span></td>
+          <td>${formatDate(b.createdAt || b.date)}</td>
+          <td><button onclick="adminDelete('/admin/bookings/${escapeHtml(b.id || '')}')" class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">حذف</button></td>
+        </tr>
+      `, true);
+
+      const services = objToArr(DATA.services);
+      renderTable('table-services', ['المعرف', 'النوع', 'المدينة'], services.slice(0, 50), s => `
+        <tr>
+          <td class="font-mono text-sm">${escapeHtml(String(s.id || '').slice(0, 16))}</td>
+          <td>${escapeHtml(s.serviceType || s.type || '—')}</td>
+          <td>${escapeHtml(s.city || '—')}</td>
+          <td><button onclick="adminDelete('/admin/services/${escapeHtml(s.id || '')}')" class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">حذف</button></td>
+        </tr>
+      `, true);
+    }
+
+    function showTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.sidebar-btn').forEach(el => el.classList.remove('bg-amber-600'));
+      const content = document.getElementById('content-' + tab);
+      const btn = document.querySelector('[data-tab="' + tab + '"]');
+      if (content) content.classList.add('active');
+      if (btn) btn.classList.add('bg-amber-600');
+      document.getElementById('search-box').classList.remove('hidden');
+      const titles = {
+        users: { title: 'المستخدمون', desc: 'قائمة المستخدمين المسجلين' },
+        horses: { title: 'الخيل', desc: 'عروض الخيل المضافة' },
+        videos: { title: 'الفيديوهات', desc: 'مقاطع الفيديو' },
+        comments: { title: 'التعليقات', desc: 'تعليقات الفيديوهات' },
+        favorites: { title: 'المفضلة', desc: 'قوائم المفضلة للمستخدمين' },
+        bookings: { title: 'الحجوزات', desc: 'حجوزات الخدمات' },
+        services: { title: 'الخدمات', desc: 'الخدمات المسجلة' }
+      };
+      const t = titles[tab] || { title: tab, desc: '' };
+      document.getElementById('page-title').textContent = t.title;
+      document.getElementById('page-desc').textContent = t.desc;
+    }
+
+    document.querySelectorAll('.sidebar-btn').forEach(btn => {
+      btn.addEventListener('click', () => showTab(btn.getAttribute('data-tab')));
+    });
+
+    document.getElementById('btn-refresh').addEventListener('click', () => loadData());
+
+    async function doLogin() {
+      const key = document.getElementById('admin-key-input').value.trim();
+      if (!key) { document.getElementById('login-error').textContent = 'أدخل كلمة السر'; document.getElementById('login-error').classList.remove('hidden'); return; }
+      sessionStorage.setItem('adminKey', key);
+      const res = await fetch('/admin/data', { headers: getAdminHeaders() });
+      if (res.status === 403) {
+        sessionStorage.removeItem('adminKey');
+        document.getElementById('login-error').textContent = 'كلمة سر الإدارة غير صحيحة';
+        document.getElementById('login-error').classList.remove('hidden');
+        return;
+      }
+      document.getElementById('login-error').classList.add('hidden');
+      hideLogin();
+      loadData();
+    }
+    document.getElementById('btn-login').addEventListener('click', doLogin);
+    document.getElementById('admin-key-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+
+    document.getElementById('btn-logout').addEventListener('click', function() {
+      sessionStorage.removeItem('adminKey');
+      showLogin();
+    });
+
+    if (!sessionStorage.getItem('adminKey')) showLogin();
+    else { hideLogin(); loadData(); }
+
+    document.getElementById('search-input').addEventListener('input', function() {
+      const q = this.value.trim().toLowerCase();
+      if (!currentTab || !currentRows.length) return;
+      const tableId = 'table-' + currentTab;
+      const tbody = document.querySelector('#' + tableId + ' tbody');
+      if (!tbody) return;
+      const trs = tbody.querySelectorAll('tr');
+      trs.forEach((tr, i) => {
+        const row = currentRows[i];
+        if (!row) return;
+        const text = JSON.stringify(row).toLowerCase();
+        tr.style.display = q === '' || text.includes(q) ? '' : 'none';
+      });
+    });
+
+    loadData();
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Render Blueprint — بعد رفع المستودع: New → Blueprint → اربط github.com/semester2030/horse-backend
+services:
+  - type: web
+    name: horse-backend
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health

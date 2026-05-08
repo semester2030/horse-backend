@@ -1,0 +1,318 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Aladiyat API",
+    "version": "1.0.0",
+    "description": "Backend API for horse app - auth, users, horses, favorites, bookings, services, videos.\n\nملاحظة: مسارات Express الفعلية في index.js هي مصدر الحقيقة؛ يُحدَّث هذا الملف يدوياً عند إضافة معاملات جديدة."
+  },
+  "servers": [
+    { "url": "http://localhost:4000", "description": "Development" }
+  ],
+  "tags": [
+    { "name": "health", "description": "Health check" },
+    { "name": "auth", "description": "Auth" },
+    { "name": "users", "description": "Users" },
+    { "name": "horses", "description": "Horses" },
+    { "name": "favorites", "description": "Favorites" },
+    { "name": "bookings", "description": "Bookings" },
+    { "name": "services", "description": "Services" },
+    { "name": "videos", "description": "Videos" }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Health",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Health check",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Register",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": { "email": { "type": "string" }, "password": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" }, "400": { "description": "Bad request" } }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": { "email": { "type": "string" }, "password": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Token" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Forgot password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "email": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Refresh token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "refreshToken": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": { "200": { "description": "New token" } }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["users"],
+        "summary": "List users",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "List" } }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "tags": ["users"],
+        "summary": "Get user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "User" }, "404": { "description": "Not found" } }
+      },
+      "put": {
+        "tags": ["users"],
+        "summary": "Put user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "patch": {
+        "tags": ["users"],
+        "summary": "Patch user",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/horses": {
+      "get": {
+        "tags": ["horses"],
+        "summary": "List horses (عام — بدون توكن؛ يدعم دخول تجريبي وعرض الخريطة)",
+        "parameters": [
+          { "name": "species", "in": "query", "description": "horse | camel | falcon — البيانات بدون حقل species تُعامل كـ horse", "schema": { "type": "string", "enum": ["horse", "camel", "falcon"] } },
+          { "name": "type", "in": "query", "schema": { "type": "string" } },
+          { "name": "gender", "in": "query", "schema": { "type": "string" } },
+          { "name": "city", "in": "query", "schema": { "type": "string" } },
+          { "name": "minPrice", "in": "query", "schema": { "type": "number" } },
+          { "name": "maxPrice", "in": "query", "schema": { "type": "number" } },
+          { "name": "sortBy", "in": "query", "description": "مثال: price_asc, price_desc", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "List" } }
+      },
+      "post": {
+        "tags": ["horses"],
+        "summary": "Create horse",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/horses/{id}": {
+      "get": {
+        "tags": ["horses"],
+        "summary": "Get horse",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Horse" }, "404": { "description": "Not found" } }
+      },
+      "patch": {
+        "tags": ["horses"],
+        "summary": "Update horse",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/favorites/{userId}": {
+      "get": {
+        "tags": ["favorites"],
+        "summary": "Get favorites",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "horseIds" } }
+      },
+      "patch": {
+        "tags": ["favorites"],
+        "summary": "Update favorites",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "horseIds": { "type": "array", "items": { "type": "string" } } } } } } },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/favorites/{userId}/items": {
+      "post": {
+        "tags": ["favorites"],
+        "summary": "Add favorite",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "horseId": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "OK" } }
+      }
+    },
+    "/favorites/{userId}/items/{horseId}": {
+      "delete": {
+        "tags": ["favorites"],
+        "summary": "Remove favorite",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "horseId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/bookings": {
+      "get": {
+        "tags": ["bookings"],
+        "summary": "List bookings",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "providerId", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "List" } }
+      },
+      "post": {
+        "tags": ["bookings"],
+        "summary": "Create booking",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/bookings/{id}": {
+      "patch": {
+        "tags": ["bookings"],
+        "summary": "Update booking",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "notes": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/services": {
+      "get": {
+        "tags": ["services"],
+        "summary": "List services",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string" } },
+          { "name": "providerId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "List" } }
+      },
+      "post": {
+        "tags": ["services"],
+        "summary": "Create service",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/services/{id}": {
+      "patch": {
+        "tags": ["services"],
+        "summary": "Update service",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      },
+      "delete": {
+        "tags": ["services"],
+        "summary": "Delete service",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/videos": {
+      "get": {
+        "tags": ["videos"],
+        "summary": "List videos",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "type", "in": "query", "description": "horse | camel | falcon | service", "schema": { "type": "string" } },
+          { "name": "q", "in": "query", "description": "بحث في العنوان / الاسم / اسم الخدمة / الوصف", "schema": { "type": "string" } },
+          { "name": "sort", "in": "query", "description": "newest (افتراضي) | oldest | views_desc | likes_desc", "schema": { "type": "string" } },
+          { "name": "serviceCategory", "in": "query", "description": "لفيديوهات type=service — يطابق serviceCategory أو serviceType", "schema": { "type": "string" } },
+          { "name": "targetSpecies", "in": "query", "description": "horse | camel | falcon | all — يطابق targetSpecies أو applicableSpecies", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "List" } }
+      },
+      "post": {
+        "tags": ["videos"],
+        "summary": "Create video",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/videos/{id}": {
+      "patch": {
+        "tags": ["videos"],
+        "summary": "Update video",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Bearer token from POST /auth/login"
+      }
+    }
+  }
+}
