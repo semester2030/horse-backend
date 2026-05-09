@@ -10,6 +10,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
+const FormDataNode = require('form-data');
 
 let swaggerDocument;
 try {
@@ -714,6 +715,130 @@ app.delete('/admin/services/:id', requireAdmin, (req, res) => {
   store.services.delete(id);
   saveStore();
   res.json({ ok: true, message: 'تم حذف الخدمة' });
+});
+
+// ========== Cloudflare (أسرار على الخادم فقط — التطبيق لا يحمل API Token) ==========
+const cfAccountId = () => process.env.CLOUDFLARE_ACCOUNT_ID || '';
+const cfApiToken = () => process.env.CLOUDFLARE_API_TOKEN || '';
+
+async function cfFetchJson(url, options = {}) {
+  const token = cfApiToken();
+  if (!token) throw new Error('CLOUDFLARE_API_TOKEN غير مضبوط');
+  const r = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+  const text = await r.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`استجابة غير JSON من Cloudflare (${r.status})`);
+  }
+  if (!r.ok || data.success === false) {
+    const msg = data.errors?.map((e) => e.message).join('; ') || data.message || `HTTP ${r.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+/** جلسة رفع Stream — يعيد uploadURL لمرة واحدة (لا يُعرَّض التوكن للتطبيق) */
+app.post('/media/stream/direct-upload', auth, async (req, res) => {
+  const accountId = cfAccountId();
+  if (!accountId || !cfApiToken()) {
+    return res.status(503).json({
+      message: 'الخادم لم يُكوَّن لـ Cloudflare Stream. اضبط CLOUDFLARE_ACCOUNT_ID و CLOUDFLARE_API_TOKEN على Render.',
+    });
+  }
+  try {
+    const data = await cfFetchJson(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/direct_upload`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          maxDurationSeconds: 3600,
+          requireSignedURLs: false,
+          allowedOrigins: ['*'],
+        }),
+      },
+    );
+    const result = data.result;
+    if (!result?.uploadURL || !result?.uid) {
+      return res.status(502).json({ message: 'استجابة Cloudflare غير متوقعة' });
+    }
+    return res.json({
+      uploadURL: result.uploadURL,
+      uid: result.uid,
+    });
+  } catch (e) {
+    console.error('[media/stream/direct-upload]', e.message);
+    return res.status(502).json({ message: e.message || 'فشل إنشاء جلسة الرفع' });
+  }
+});
+
+/** جلسة رفع Cloudflare Images (V2 — جسم multipart) */
+app.post('/media/images/direct-upload', auth, async (req, res) => {
+  const accountId = cfAccountId();
+  const token = cfApiToken();
+  if (!accountId || !token) {
+    return res.status(503).json({
+      message: 'الخادم لم يُكوَّن لـ Cloudflare Images. اضبط المتغيرات على الخادم.',
+    });
+  }
+  try {
+    const formData = new FormDataNode();
+    formData.append('requireSignedURLs', 'false');
+    const r = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v2/direct_upload`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...formData.getHeaders(),
+        },
+        body: formData,
+      },
+    );
+    const data = await r.json();
+    if (!r.ok || data.success === false) {
+      const msg = data.errors?.map((e) => e.message).join('; ') || data.message || `HTTP ${r.status}`;
+      throw new Error(msg);
+    }
+    const result = data.result;
+    if (!result?.uploadURL || !result?.id) {
+      return res.status(502).json({ message: 'استجابة Cloudflare Images غير متوقعة' });
+    }
+    return res.json({
+      uploadURL: result.uploadURL,
+      id: result.id,
+    });
+  } catch (e) {
+    console.error('[media/images/direct-upload]', e.message);
+    return res.status(502).json({ message: e.message || 'فشل إنشاء جلسة رفع الصورة' });
+  }
+});
+
+/** تفاصيل فيديو Stream — بالوكيل حتى لا يحتاج التطبيق التوكن */
+app.get('/media/stream/:videoId', auth, async (req, res) => {
+  const accountId = cfAccountId();
+  const { videoId } = req.params;
+  if (!accountId || !cfApiToken()) {
+    return res.status(503).json({ message: 'تكوين Cloudflare غير مكتمل على الخادم' });
+  }
+  try {
+    const data = await cfFetchJson(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/${videoId}`,
+      { method: 'GET' },
+    );
+    return res.json(data.result || data);
+  } catch (e) {
+    console.error('[media/stream/:videoId]', e.message);
+    return res.status(502).json({ message: e.message || 'فشل جلب الفيديو' });
+  }
 });
 
 // ========== تشغيل الخادم ==========

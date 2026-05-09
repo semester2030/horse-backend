@@ -59,6 +59,26 @@ npm start
 
 التخزين **في الذاكرة + حفظ تلقائي في ملف** `data/store.json` (يبقى بعد إعادة تشغيل الخادم). يمكن لاحقاً ربط MongoDB أو قاعدة بيانات أخرى.
 
+## Cloudflare (رفع فيديو / صور من التطبيق)
+
+التوكن **لا يُخزَّن في تطبيق Flutter** (متطلبات أمان ومتاجر التطبيقات).  
+اضبط المتغيرات على **Render** (أو `.env` محلياً):
+
+| المتغير | الوصف |
+|---------|--------|
+| `CLOUDFLARE_ACCOUNT_ID` | من لوحة Cloudflare → Overview → Account ID |
+| `CLOUDFLARE_API_TOKEN` | Token بصلاحيات **Stream: Edit** و **Cloudflare Images: Edit** (أو أنشئ من Templates) |
+
+الباك اند يعرّض:
+
+- `POST /media/stream/direct-upload` (يتطلب `Authorization: Bearer <jwt>`)
+- `POST /media/images/direct-upload`
+- `GET /media/stream/:videoId`
+
+التطبيق يطلب جلسة رفع ثم يرفع الملف إلى رابط Cloudflare لمرة واحدة.
+
+مرجع: انسخ من `.env.example`.
+
 ## ربط التطبيق (Flutter)
 
 في `app/lib/main.dart` (أو عند بدء التشغيل):
