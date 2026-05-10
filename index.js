@@ -130,6 +130,24 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'باك اند العاديات - يعمل', port: PORT });
 });
+/**
+ * جزء subdomain الخاص بـ Stream يظهر في كل روابط التشغيل العامة (customer-XXXX.cloudflarestream.com).
+ * ضعه على Render كـ CLOUDFLARE_STREAM_CUSTOMER_HASH أو CLOUDFLARE_CUSTOMER_HASH — انسخه من رابط HLS في لوحة Stream.
+ */
+app.get('/media/public/stream-customer-hash', (req, res) => {
+  const h =
+    (process.env.CLOUDFLARE_STREAM_CUSTOMER_HASH ||
+      process.env.CLOUDFLARE_CUSTOMER_HASH ||
+      '').trim();
+  if (!h) {
+    return res.status(404).json({
+      message:
+        'CLOUDFLARE_STREAM_CUSTOMER_HASH غير مُعرّف على الخادم — من لوحة Cloudflare Stream انسخ الجزء بعد customer- من أي رابط تشغيل.',
+    });
+  }
+  res.json({ customerHash: h });
+});
+
 app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
