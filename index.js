@@ -10,7 +10,6 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
-const FormDataNode = require('form-data');
 
 let swaggerDocument;
 try {
@@ -47,7 +46,11 @@ const store = {
   services: new Map(),
   videos: new Map(),
   videoComments: {}, // videoId -> [ { id, userId, text, createdAt } ]
+  /** @type {{ id: string, fromUserId: string, toUserId: string, text: string, createdAt: string, read?: boolean }[]} */
+  messages: [],
   refreshTokens: new Map(),
+  /** @type {Map<string, { userId: string }>} idToken (Bearer) → مستخدم الجلسة */
+  accessTokens: new Map(),
 };
 
 function loadStore() {
@@ -76,6 +79,21 @@ function loadStore() {
     if (data.videoComments && typeof data.videoComments === 'object') {
       store.videoComments = data.videoComments;
     }
+    if (Array.isArray(data.messages)) {
+      store.messages = data.messages;
+    } else {
+      store.messages = [];
+    }
+    if (data.accessTokens && typeof data.accessTokens === 'object') {
+      store.accessTokens = new Map(
+        Object.entries(data.accessTokens).map(([k, v]) => [
+          k,
+          typeof v === 'object' && v && v.userId ? { userId: String(v.userId) } : { userId: '' },
+        ]),
+      );
+    } else {
+      store.accessTokens = new Map();
+    }
     console.log('تم تحميل البيانات: ' + store.users.size + ' مستخدم، ' + store.horses.size + ' خيل');
   } catch (e) {
     console.log('لم يتم تحميل بيانات سابقة:', e.message);
@@ -93,6 +111,8 @@ function saveStore() {
       services: Object.fromEntries(store.services),
       videos: Object.fromEntries(store.videos),
       videoComments: store.videoComments,
+      messages: store.messages,
+      accessTokens: Object.fromEntries(store.accessTokens),
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
@@ -172,6 +192,7 @@ app.post('/auth/register', (req, res) => {
   const idToken = token();
   const refreshToken = token();
   store.refreshTokens.set(refreshToken, { userId, email });
+  store.accessTokens.set(idToken, { userId });
   saveStore();
   res.status(201).json({
     idToken,
@@ -196,6 +217,8 @@ app.post('/auth/login', (req, res) => {
   const idToken = token();
   const refreshToken = token();
   store.refreshTokens.set(refreshToken, { userId, email });
+  store.accessTokens.set(idToken, { userId });
+  saveStore();
   res.json({
     idToken,
     refreshToken,
@@ -228,6 +251,8 @@ app.post('/auth/refresh', (req, res) => {
     return res.status(401).json({ message: 'توكن غير صالح' });
   }
   const idToken = token();
+  store.accessTokens.set(idToken, { userId: data.userId });
+  saveStore();
   res.json({
     accessToken: idToken,
     idToken,
@@ -247,6 +272,23 @@ const auth = (req, res, next) => {
   req.token = t;
   next();
 };
+
+/** يثبت هوية حامل التوكن (يجب أن يكون idToken صادراً عن تسجيل الدخول / التجديد) */
+function requireSessionUser(req, res, next) {
+  const entry = store.accessTokens.get(req.token);
+  if (!entry || !entry.userId) {
+    return res.status(401).json({
+      message: 'توكن الجلسة غير معروف — أعد تسجيل الدخول لاستخدام الرسائل أو تحديث الحجوزات',
+    });
+  }
+  req.authUserId = String(entry.userId);
+  next();
+}
+
+function sessionUserIdFromToken(t) {
+  const entry = store.accessTokens.get(t);
+  return entry && entry.userId ? String(entry.userId) : null;
+}
 
 // ========== Middleware: صلاحيات الإدارة (كلمة سر الإدارة) ==========
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'admin123';
@@ -302,11 +344,17 @@ app.patch('/users/:id', auth, (req, res) => {
 // ========== Horses ==========
 // GET /horses بدون auth حتى يعمل "دخول تجريبي" وعرض الخيل للجميع
 app.get('/horses', (req, res) => {
-  const { type, gender, city, minPrice, maxPrice, sortBy, limit, species } = req.query;
+  const { type, gender, city, minPrice, maxPrice, sortBy, limit, species, ownerId } = req.query;
   let list = [...store.horses.values()];
   // فئة المنصة: horse | camel | falcon — البيانات القديمة تُعامل كـ horse
   if (species) {
     list = list.filter((h) => (h.species || 'horse') === species);
+  }
+  if (ownerId) {
+    const oid = String(ownerId);
+    list = list.filter(
+      (h) => String(h.ownerId || h.userId || '') === oid,
+    );
   }
   if (type) list = list.filter(h => h.type === type);
   if (gender) list = list.filter(h => h.gender === gender);
@@ -380,9 +428,10 @@ app.delete('/favorites/:userId/items/:horseId', auth, (req, res) => {
 
 // ========== Bookings ==========
 app.get('/bookings', auth, (req, res) => {
-  const { providerId, status } = req.query;
+  const { providerId, customerId, status } = req.query;
   let list = [...store.bookings.values()];
-  if (providerId) list = list.filter(b => b.providerId === providerId);
+  if (providerId) list = list.filter(b => String(b.providerId || '') === String(providerId));
+  if (customerId) list = list.filter(b => String(b.userId || '') === String(customerId));
   if (status) list = list.filter(b => b.status === status);
   res.json(list);
 });
@@ -391,6 +440,7 @@ app.post('/bookings', auth, (req, res) => {
   const bookingId = id();
   const booking = { id: bookingId, ...req.body, createdAt: new Date().toISOString() };
   store.bookings.set(bookingId, booking);
+  saveStore();
   res.status(201).json(booking);
 });
 
@@ -398,8 +448,28 @@ app.patch('/bookings/:id', auth, (req, res) => {
   const { id } = req.params;
   const existing = store.bookings.get(id);
   if (!existing) return res.status(404).json({ message: 'الحجز غير موجود' });
+
+  if (req.body != null && Object.prototype.hasOwnProperty.call(req.body, 'status')) {
+    const sid = sessionUserIdFromToken(req.token);
+    if (!sid) {
+      return res.status(401).json({ message: 'أعد تسجيل الدخول لتعديل حالة الحجز' });
+    }
+    const isProvider = String(existing.providerId || '') === sid;
+    const isCustomer = String(existing.userId || '') === sid;
+    if (!isProvider && !isCustomer) {
+      return res.status(403).json({ message: 'غير مصرح بتعديل هذا الحجز' });
+    }
+    if (isCustomer) {
+      const st = String(req.body.status);
+      if (st !== 'cancelled') {
+        return res.status(403).json({ message: 'يمكن للعميل إلغاء الحجز فقط (حالة cancelled)' });
+      }
+    }
+  }
+
   const updated = { ...existing, ...req.body, id, updatedAt: new Date().toISOString() };
   store.bookings.set(id, updated);
+  saveStore();
   res.json(updated);
 });
 
@@ -622,6 +692,123 @@ app.get('/videos/:id/comments', auth, (req, res) => {
 
 app.patch('/videos/:id/shares', auth, (req, res) => res.json({ ok: true }));
 
+// ========== لوحة التحكم (ملخص للمستخدم الحالي) ==========
+app.get('/dashboard/summary', auth, requireSessionUser, (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  if (!userId) {
+    return res.status(400).json({ message: 'userId مطلوب' });
+  }
+  if (userId !== req.authUserId) {
+    return res.status(403).json({ message: 'لا يمكن جلب ملخص مستخدم آخر' });
+  }
+  const horsesListed = [...store.horses.values()].filter(
+    (h) => String(h.ownerId || h.userId || '') === userId,
+  ).length;
+  const servicesListed = [...store.services.values()].filter(
+    (s) => String(s.providerId || '') === userId,
+  ).length;
+  const videosListed = [...store.videos.values()].filter(
+    (v) => String(v.userId || '') === userId,
+  ).length;
+  const allBookings = [...store.bookings.values()];
+  const asProvider = allBookings.filter((b) => String(b.providerId || '') === userId);
+  const asCustomer = allBookings.filter((b) => String(b.userId || '') === userId);
+  const pendingProviderBookings = asProvider.filter((b) => (b.status || 'pending') === 'pending').length;
+  const fav = store.favorites.get(userId) || { horseIds: [] };
+  const favoriteHorsesCount = (fav.horseIds || []).length;
+  res.json({
+    userId,
+    horsesListed,
+    servicesListed,
+    videosListed,
+    bookingsAsProvider: asProvider.length,
+    bookingsAsCustomer: asCustomer.length,
+    pendingProviderBookings,
+    favoriteHorsesCount,
+  });
+});
+
+// ========== CRM — طلبات قيد الانتظار لمقدم الخدمة ==========
+app.get('/crm/leads', auth, requireSessionUser, (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  if (!userId) {
+    return res.status(400).json({ message: 'userId مطلوب' });
+  }
+  if (userId !== req.authUserId) {
+    return res.status(403).json({ message: 'لا يمكن جلب طلبات مقدم خدمة آخر' });
+  }
+  const leads = [...store.bookings.values()]
+    .filter(
+      (b) =>
+        String(b.providerId || '') === userId &&
+        String(b.status || 'pending') === 'pending',
+    )
+    .map((b) => ({
+      id: b.id,
+      type: b.type,
+      serviceName: b.serviceName,
+      customerName: b.customerName,
+      customerPhone: b.customerPhone,
+      totalPrice: b.totalPrice,
+      createdAt: b.createdAt,
+      userId: b.userId,
+    }))
+    .sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return tb - ta;
+    });
+  res.json(leads);
+});
+
+// ========== الرسائل (هوية المرسل من التوكن فقط) ==========
+app.get('/messages', auth, requireSessionUser, (req, res) => {
+  const userId = req.authUserId;
+  const list = (store.messages || [])
+    .filter((m) => m.fromUserId === userId || m.toUserId === userId)
+    .sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return tb - ta;
+    });
+  res.json(list);
+});
+
+app.post('/messages', auth, requireSessionUser, (req, res) => {
+  const fromUserId = req.authUserId;
+  const { toUserId, text, fromUserId: spoofFrom } = req.body || {};
+  if (spoofFrom != null && String(spoofFrom) !== '' && String(spoofFrom) !== fromUserId) {
+    return res.status(403).json({ message: 'لا يمكن الإرسال باسم مستخدم آخر' });
+  }
+  const to = toUserId != null ? String(toUserId).trim() : '';
+  const bodyText = text != null ? String(text).trim() : '';
+  if (!to || !bodyText) {
+    return res.status(400).json({ message: 'toUserId والنص مطلوبان' });
+  }
+  if (to === fromUserId) {
+    return res.status(400).json({ message: 'لا يمكن إرسال رسالة إلى نفسك' });
+  }
+  if (!store.users.has(to)) {
+    return res.status(400).json({ message: 'المستقبل غير موجود' });
+  }
+  const maxLen = 8000;
+  if (bodyText.length > maxLen) {
+    return res.status(400).json({ message: `النص يتجاوز الحد (${maxLen} حرفاً)` });
+  }
+  const msg = {
+    id: id(),
+    fromUserId,
+    toUserId: to,
+    text: bodyText,
+    createdAt: new Date().toISOString(),
+    read: false,
+  };
+  if (!Array.isArray(store.messages)) store.messages = [];
+  store.messages.push(msg);
+  saveStore();
+  res.status(201).json(msg);
+});
+
 // ========== إدارة - لوحة التحكم وتصدير البيانات ==========
 // لوحة إدارة تفاعلية: افتح في المتصفح http://localhost:4000/admin
 app.get('/admin', (req, res) => {
@@ -638,6 +825,7 @@ app.get('/admin/data', requireAdmin, (req, res) => {
     services: Object.fromEntries(store.services),
     videos: Object.fromEntries(store.videos),
     videoComments: store.videoComments,
+    messages: store.messages || [],
   };
   res.json(data);
 });
@@ -808,17 +996,18 @@ app.post('/media/images/direct-upload', auth, async (req, res) => {
     });
   }
   try {
-    const formData = new FormDataNode();
-    formData.append('requireSignedURLs', 'false');
+    // استخدم FormData المدمج مع fetch (Node 18+) — حزمة `form-data` + fetch تعطي غالباً
+    // "Bad request: incomplete multipart stream" من Cloudflare (كما في سجلات Render).
+    const fd = new FormData();
+    fd.append('requireSignedURLs', 'false');
     const r = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v2/direct_upload`,
       {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
-          ...formData.getHeaders(),
         },
-        body: formData,
+        body: fd,
       },
     );
     const data = await r.json();
