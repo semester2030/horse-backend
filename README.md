@@ -57,7 +57,29 @@ npm start
 
 ## التخزين الحالي
 
-التخزين **في الذاكرة + حفظ تلقائي في ملف** `data/store.json` (يبقى بعد إعادة تشغيل الخادم). يمكن لاحقاً ربط MongoDB أو قاعدة بيانات أخرى.
+التخزين **في الذاكرة + حفظ تلقائي** في `store.json`:
+
+| البيئة | المسار |
+|--------|--------|
+| محلي | `backend/data/store.json` |
+| Render (إنتاج) | `/var/data/store.json` على **قرص دائم** |
+
+### Render — عدم مسح البيانات بعد كل نشر
+
+ملف `render.yaml` يفعّل:
+
+- `plan: starter` (القرص الدائم **لا يعمل** على الخطة المجانية free)
+- قرص `mountPath: /var/data` + `DATA_DIR=/var/data`
+
+بعد دفع `render.yaml` إلى GitHub:
+
+1. في [Render Dashboard](https://dashboard.render.com) → **horse-backend** → تأكد أن الخطة **Starter** (أو أعلى).
+2. إن كان الخدمة على **Free**، غيّرها إلى **Starter** ثم أعد النشر من Blueprint أو Sync.
+3. تحقق: `GET https://horse-backend-i68h.onrender.com/health` — يجب أن يظهر `dataDir: "/var/data"` و `dataFileExists: true` بعد أول حفظ.
+
+**تحذير:** البيانات التي فُقدت قبل تفعيل القرص لا تُستعاد تلقائياً — أعد إدخالها أو استورد نسخة من `data/store.json` المحلي إن وُجدت.
+
+يمكن لاحقاً ربط PostgreSQL إذا كبر حجم البيانات.
 
 ## Cloudflare (رفع فيديو / صور من التطبيق)
 

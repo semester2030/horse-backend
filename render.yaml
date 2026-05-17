@@ -1,10 +1,21 @@
-# Render Blueprint — بعد رفع المستودع: New → Blueprint → اربط github.com/semester2030/horse-backend
+# Render Blueprint — horse-backend
+# قرص دائم: البيانات (store.json) لا تُمسح عند كل deploy.
+# ملاحظة: القرص الدائم يتطلب خطة starter أو أعلى (ليس free).
 services:
   - type: web
     name: horse-backend
     runtime: node
-    plan: free
+    plan: starter
     region: frankfurt
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: horse-store
+      mountPath: /var/data
+      sizeGB: 1

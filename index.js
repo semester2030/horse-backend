@@ -33,9 +33,25 @@ try {
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// مسار حفظ البيانات (يبقى الحساب بعد إعادة تشغيل الباك اند)
-const DATA_DIR = './data';
-const DATA_FILE = DATA_DIR + '/store.json';
+// مسار حفظ البيانات — محلياً: ./data | على Render: قرص دائم /var/data (انظر render.yaml)
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'store.json');
+const LEGACY_DATA_FILE = path.join(__dirname, 'data', 'store.json');
+
+function ensureDataMigrated() {
+  if (fs.existsSync(DATA_FILE)) return;
+  if (path.resolve(DATA_FILE) === path.resolve(LEGACY_DATA_FILE)) return;
+  if (!fs.existsSync(LEGACY_DATA_FILE)) return;
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.copyFileSync(LEGACY_DATA_FILE, DATA_FILE);
+    console.log(`[store] نسخ البيانات: ${LEGACY_DATA_FILE} → ${DATA_FILE}`);
+  } catch (e) {
+    console.warn('[store] تعذر نسخ البيانات القديمة:', e.message);
+  }
+}
 
 // تخزين في الذاكرة + حفظ في ملف
 const store = {
@@ -109,7 +125,11 @@ function loadStore() {
     } else {
       store.accessTokens = new Map();
     }
-    console.log('تم تحميل البيانات: ' + store.users.size + ' مستخدم، ' + store.horses.size + ' خيل');
+    const catalogN = store.catalogItems.size;
+    const videoN = store.videos.size;
+    console.log(
+      `[store] محمّل من ${DATA_FILE}: ${store.users.size} مستخدم، ${store.horses.size} خيل، ${catalogN} كتالوج، ${videoN} فيديو`,
+    );
   } catch (e) {
     console.log('لم يتم تحميل بيانات سابقة:', e.message);
   }
@@ -138,6 +158,7 @@ function saveStore() {
   }
 }
 
+ensureDataMigrated();
 loadStore();
 
 // توليد معرف فريد
@@ -187,7 +208,16 @@ app.get('/media/public/stream-customer-hash', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    storage: {
+      dataDir: DATA_DIR,
+      dataFileExists: fs.existsSync(DATA_FILE),
+      users: store.users.size,
+      catalogItems: store.catalogItems.size,
+      videos: store.videos.size,
+    },
+  });
 });
 
 // ========== Auth ==========
