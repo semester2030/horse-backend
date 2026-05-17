@@ -91,6 +91,12 @@ const store = {
 const otpCodes = new Map();
 const setupTokens = new Map();
 const OTP_TTL_MS = 5 * 60 * 1000;
+
+/** إظهار الرمز في الاستجابة والتطبيق — أوقفه لاحقاً بـ OTP_EXPOSE_CODE=false بعد تفعيل SMS */
+function shouldExposeOtpCode() {
+  const flag = String(process.env.OTP_EXPOSE_CODE || 'true').toLowerCase();
+  return flag !== 'false' && flag !== '0' && flag !== 'no';
+}
 const SETUP_TTL_MS = 30 * 60 * 1000;
 
 function loadStore() {
@@ -440,8 +446,9 @@ app.post('/auth/otp/send', (req, res) => {
   const code = otpSixDigits();
   otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
   const payload = { ok: true, message: 'تم إرسال رمز التحقق' };
-  if (process.env.OTP_EXPOSE_CODE === 'true' || process.env.NODE_ENV !== 'production') {
+  if (shouldExposeOtpCode()) {
     payload.devCode = code;
+    payload.showDevCodeOnScreen = true;
     console.log(`[OTP] ${phone} => ${code}`);
   }
   res.json(payload);
