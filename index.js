@@ -1341,6 +1341,8 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
   if (req.body?.type === 'service' && serviceType) {
     const err = roles.assertVideoCreate(req.authUser, serviceType);
     if (err) return res.status(403).json({ message: err });
+    const verifyErr = roles.assertMerchantVerified(req.authUser);
+    if (verifyErr) return res.status(403).json({ message: verifyErr });
   }
   const videoId = req.body.cloudflareVideoId || id();
   const video = {
