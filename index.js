@@ -10,6 +10,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
+const roles = require('./account_roles');
 
 let swaggerDocument;
 try {
@@ -74,6 +75,12 @@ const store = {
   /** @type {Map<string, { userId: string }>} idToken (Bearer) → مستخدم الجلسة */
   accessTokens: new Map(),
 };
+
+/** رموز OTP وإعداد الحساب (ذاكرة — تُعاد إرسالها عند الحاجة) */
+const otpCodes = new Map();
+const setupTokens = new Map();
+const OTP_TTL_MS = 5 * 60 * 1000;
+const SETUP_TTL_MS = 30 * 60 * 1000;
 
 function loadStore() {
   try {
@@ -163,6 +170,46 @@ loadStore();
 
 // توليد معرف فريد
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+
+function otpSixDigits() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function findUserByPhone(phone) {
+  const p = roles.normalizePhone(phone);
+  if (!p) return null;
+  return [...store.users.values()].find((u) => roles.normalizePhone(u.phone) === p) || null;
+}
+
+function issueAuthForUser(user) {
+  const u = roles.migrateLegacyUser({ ...user });
+  if (!u.id) u.id = id();
+  store.users.set(u.id, u);
+  const userId = u.id;
+  const idToken = token();
+  const refreshToken = token();
+  store.refreshTokens.set(refreshToken, {
+    userId,
+    phone: u.phone || '',
+    email: u.email || '',
+  });
+  store.accessTokens.set(idToken, { userId });
+  saveStore();
+  return {
+    idToken,
+    refreshToken,
+    localId: userId,
+    userId,
+    email: u.email || '',
+    phone: u.phone || '',
+    accountRole: u.accountRole,
+    allowedSpecies: u.allowedSpecies || [],
+    capabilities: u.capabilities || [],
+    needsOnboarding: !u.accountRole || !roles.isValidAccountRole(u.accountRole),
+    expiresIn: 3600,
+    user: roles.publicUser(u),
+  };
+}
 // توكن بسيط (للاستبدال لاحقاً بـ JWT إن رغبت)
 const token = () => `tk_${id()}`;
 
@@ -230,26 +277,23 @@ app.post('/auth/register', (req, res) => {
   if (existing) {
     return res.status(400).json({ message: 'البريد مستخدم مسبقاً' });
   }
+  const accountRole = roles.isValidAccountRole(req.body?.accountRole)
+    ? req.body.accountRole
+    : roles.ACCOUNT_ROLES.buyer;
   const userId = id();
-  store.users.set(userId, {
-    id: userId,
-    email,
-    password,
-    createdAt: new Date().toISOString(),
+  const user = roles.buildUserFromOnboarding({
+    phone: '',
+    accountRole,
+    name: req.body?.name || '',
+    city: req.body?.city || '',
+    allowedSpecies: req.body?.allowedSpecies,
+    businessType: req.body?.businessType,
   });
-  const idToken = token();
-  const refreshToken = token();
-  store.refreshTokens.set(refreshToken, { userId, email });
-  store.accessTokens.set(idToken, { userId });
-  saveStore();
-  res.status(201).json({
-    idToken,
-    refreshToken,
-    localId: userId,
-    userId,
-    email,
-    expiresIn: 3600,
-  });
+  user.id = userId;
+  user.email = email;
+  user.password = password;
+  store.users.set(userId, roles.migrateLegacyUser(user));
+  res.status(201).json(issueAuthForUser(store.users.get(userId)));
 });
 
 app.post('/auth/login', (req, res) => {
@@ -261,20 +305,123 @@ app.post('/auth/login', (req, res) => {
   if (!user || user.password !== password) {
     return res.status(401).json({ message: 'البريد أو كلمة المرور غير صحيحة' });
   }
-  const userId = user.id || user._id;
-  const idToken = token();
-  const refreshToken = token();
-  store.refreshTokens.set(refreshToken, { userId, email });
-  store.accessTokens.set(idToken, { userId });
-  saveStore();
+  const migrated = roles.migrateLegacyUser({ ...user });
+  store.users.set(migrated.id, migrated);
+  res.json(issueAuthForUser(migrated));
+});
+
+// ========== Auth: جوال + OTP ==========
+app.post('/auth/otp/send', (req, res) => {
+  const phone = roles.normalizePhone(req.body?.phone);
+  if (!phone) {
+    return res.status(400).json({ message: 'رقم الجوال غير صالح (مثال: 05xxxxxxxx)' });
+  }
+  const code = otpSixDigits();
+  otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
+  const payload = { ok: true, message: 'تم إرسال رمز التحقق' };
+  if (process.env.OTP_EXPOSE_CODE === 'true' || process.env.NODE_ENV !== 'production') {
+    payload.devCode = code;
+    console.log(`[OTP] ${phone} => ${code}`);
+  }
+  res.json(payload);
+});
+
+app.post('/auth/otp/verify', (req, res) => {
+  const phone = roles.normalizePhone(req.body?.phone);
+  const code = String(req.body?.code || '').trim();
+  if (!phone || code.length < 4) {
+    return res.status(400).json({ message: 'رقم الجوال ورمز التحقق مطلوبان' });
+  }
+  const entry = otpCodes.get(phone);
+  if (!entry || entry.expiresAt < Date.now() || entry.code !== code) {
+    return res.status(401).json({ message: 'رمز التحقق غير صحيح أو منتهي' });
+  }
+  otpCodes.delete(phone);
+  const existing = findUserByPhone(phone);
+  if (existing) {
+    const migrated = roles.migrateLegacyUser({ ...existing });
+    if (!migrated.phone) {
+      migrated.phone = phone;
+      store.users.set(migrated.id, migrated);
+    }
+    return res.json(issueAuthForUser(migrated));
+  }
+  const setupToken = token();
+  setupTokens.set(setupToken, { phone, expiresAt: Date.now() + SETUP_TTL_MS });
   res.json({
-    idToken,
-    refreshToken,
-    localId: userId,
-    userId,
-    email: user.email,
-    expiresIn: 3600,
+    isNewUser: true,
+    setupToken,
+    phone,
+    message: 'اختر نوع الحساب لإكمال التسجيل',
   });
+});
+
+app.post('/auth/onboarding/complete', (req, res) => {
+  const setupToken = String(req.body?.setupToken || '').trim();
+  const accountRole = String(req.body?.accountRole || '').trim();
+  if (!setupToken || !roles.isValidAccountRole(accountRole)) {
+    return res.status(400).json({ message: 'نوع الحساب مطلوب' });
+  }
+  const pending = setupTokens.get(setupToken);
+  if (!pending || pending.expiresAt < Date.now()) {
+    return res.status(401).json({ message: 'انتهت جلسة التسجيل — أعد إرسال الرمز' });
+  }
+  setupTokens.delete(setupToken);
+  if (findUserByPhone(pending.phone)) {
+    return res.status(400).json({ message: 'رقم الجوال مسجل مسبقاً' });
+  }
+  const userId = id();
+  const user = roles.buildUserFromOnboarding({
+    phone: pending.phone,
+    accountRole,
+    name: req.body?.name,
+    city: req.body?.city,
+    allowedSpecies: req.body?.allowedSpecies,
+    businessType: req.body?.businessType,
+  });
+  user.id = userId;
+  user.phone = pending.phone;
+  store.users.set(userId, roles.migrateLegacyUser(user));
+  res.status(201).json(issueAuthForUser(store.users.get(userId)));
+});
+
+app.get('/auth/me', auth, requireSessionUser, (req, res) => {
+  res.json({ user: roles.publicUser(req.authUser) });
+});
+
+app.get('/auth/account-roles', (req, res) => {
+  res.json({
+    roles: Object.entries(roles.ROLE_LABELS_AR).map(([id, labelAr]) => ({ id, labelAr })),
+  });
+});
+
+/** تعيين نوع الحساب لمرة واحدة (مستخدم قديم مسجّل دخوله) */
+app.post('/auth/account-role/set', auth, requireSessionUser, (req, res) => {
+  const accountRole = String(req.body?.accountRole || '').trim();
+  if (!roles.isValidAccountRole(accountRole)) {
+    return res.status(400).json({ message: 'نوع الحساب غير صالح' });
+  }
+  const existing = req.authUser;
+  if (existing.accountRoleSetAt) {
+    return res.status(403).json({ message: 'تم تعيين نوع الحساب مسبقاً — تواصل مع الدعم للتغيير' });
+  }
+  const updated = roles.buildUserFromOnboarding({
+    phone: existing.phone,
+    accountRole,
+    name: req.body?.name || existing.name,
+    city: req.body?.city || existing.city,
+    allowedSpecies: req.body?.allowedSpecies || existing.allowedSpecies,
+    businessType: req.body?.businessType,
+  });
+  updated.id = existing.id;
+  updated.email = existing.email;
+  updated.password = existing.password;
+  updated.phone = existing.phone || updated.phone;
+  updated.accountRoleSetAt = new Date().toISOString();
+  const migrated = roles.migrateLegacyUser(updated);
+  store.users.set(migrated.id, migrated);
+  saveStore();
+  res.json(issueAuthForUser(migrated));
 });
 
 app.post('/auth/forgot-password', (req, res) => {
@@ -330,6 +477,12 @@ function requireSessionUser(req, res, next) {
     });
   }
   req.authUserId = String(entry.userId);
+  const raw = store.users.get(req.authUserId);
+  if (!raw) {
+    return res.status(401).json({ message: 'المستخدم غير موجود — أعد تسجيل الدخول' });
+  }
+  req.authUser = roles.migrateLegacyUser({ ...raw });
+  store.users.set(req.authUserId, req.authUser);
   next();
 }
 
@@ -378,11 +531,23 @@ app.put('/users/:id', auth, (req, res) => {
   res.json(body);
 });
 
-app.patch('/users/:id', auth, (req, res) => {
+app.patch('/users/:id', auth, requireSessionUser, (req, res) => {
   const { id } = req.params;
+  if (String(id) !== req.authUserId) {
+    return res.status(403).json({ message: 'لا يمكنك تعديل حساب آخر' });
+  }
   const existing = store.users.get(id);
   if (!existing) return res.status(404).json({ message: 'المستخدم غير موجود' });
-  const updated = { ...existing, ...req.body, id, updatedAt: new Date().toISOString() };
+  const body = { ...req.body };
+  delete body.accountRole;
+  delete body.capabilities;
+  delete body.password;
+  const updated = roles.migrateLegacyUser({
+    ...existing,
+    ...body,
+    id,
+    updatedAt: new Date().toISOString(),
+  });
   store.users.set(id, updated);
   const { password, ...rest } = updated;
   saveStore();
@@ -422,9 +587,22 @@ app.get('/horses/:id', auth, (req, res) => {
   res.json(h);
 });
 
-app.post('/horses', auth, (req, res) => {
+app.post('/horses', auth, requireSessionUser, (req, res) => {
+  const species =
+    req.body?.species ||
+    req.body?.listingSpecies ||
+    req.body?.applicableSpecies?.[0] ||
+    'horse';
+  const err = roles.assertListingCreate(req.authUser, species);
+  if (err) return res.status(403).json({ message: err });
   const horseId = id();
-  const horse = { id: horseId, ...req.body, createdAt: new Date().toISOString() };
+  const horse = {
+    id: horseId,
+    ...req.body,
+    userId: req.authUserId,
+    sellerId: req.authUserId,
+    createdAt: new Date().toISOString(),
+  };
   store.horses.set(horseId, horse);
   saveStore();
   res.status(201).json(horse);
@@ -539,10 +717,20 @@ app.get('/services', auth, (req, res) => {
   res.json(list);
 });
 
-app.post('/services', auth, (req, res) => {
+app.post('/services', auth, requireSessionUser, (req, res) => {
+  const serviceType = String(req.body?.type || req.body?.serviceType || '').trim();
+  const err = roles.assertServiceCreate(req.authUser, serviceType);
+  if (err) return res.status(403).json({ message: err });
   const serviceId = id();
-  const service = { id: serviceId, ...req.body, createdAt: new Date().toISOString() };
+  const service = {
+    id: serviceId,
+    ...req.body,
+    type: serviceType || req.body?.type,
+    providerId: req.authUserId,
+    createdAt: new Date().toISOString(),
+  };
   store.services.set(serviceId, service);
+  saveStore();
   res.status(201).json(service);
 });
 
@@ -671,6 +859,8 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
   if (category !== 'feed' && category !== 'supplies' && category !== 'equipment') {
     return res.status(400).json({ message: 'category يجب أن يكون feed أو supplies أو equipment' });
   }
+  const roleErr = roles.assertCatalogCreate(req.authUser, category);
+  if (roleErr) return res.status(403).json({ message: roleErr });
   if (!body.name || !String(body.name).trim()) {
     return res.status(400).json({ message: 'اسم المنتج مطلوب' });
   }
@@ -678,6 +868,7 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
   const item = {
     id: itemId,
     sellerId: req.authUserId,
+    sellerRole: req.authUser.accountRole,
     category,
     applicableSpecies: parseSpeciesList(body.applicableSpecies).length
       ? parseSpeciesList(body.applicableSpecies)
@@ -694,6 +885,10 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
     contactWhatsapp: body.contactWhatsapp ? String(body.contactWhatsapp) : '',
     condition: body.condition ? String(body.condition) : 'new',
     inStock: body.inStock !== false,
+    shopType:
+      req.authUser.accountRole === roles.ACCOUNT_ROLES.vet_clinic && category === 'supplies'
+        ? 'vet'
+        : category,
     status: 'active',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1056,11 +1251,19 @@ app.get('/videos', auth, (req, res) => {
   res.json(list);
 });
 
-app.post('/videos', auth, (req, res) => {
+app.post('/videos', auth, requireSessionUser, (req, res) => {
+  const serviceType = String(
+    req.body?.serviceType || req.body?.serviceCategory || '',
+  ).trim();
+  if (req.body?.type === 'service' && serviceType) {
+    const err = roles.assertVideoCreate(req.authUser, serviceType);
+    if (err) return res.status(403).json({ message: err });
+  }
   const videoId = req.body.cloudflareVideoId || id();
   const video = {
     id: videoId,
     ...req.body,
+    userId: req.body.userId || req.authUserId,
     createdAt: new Date().toISOString(),
     likes: req.body.likes ?? 0,
     likedBy: req.body.likedBy ?? [],
