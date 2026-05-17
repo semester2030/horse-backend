@@ -40,6 +40,11 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 const LEGACY_DATA_FILE = path.join(__dirname, 'data', 'store.json');
+const VERIFICATION_DIR = path.join(DATA_DIR, 'verification');
+const ADMIN_JWT_SECRET =
+  process.env.ADMIN_JWT_SECRET || process.env.ADMIN_SECRET || 'nomas-admin-jwt-change-me';
+const { createAdminRouter, registerAppVerificationRoutes } = require('./admin/routes');
+const { seedSuperAdmin } = require('./admin/auth');
 
 function ensureDataMigrated() {
   if (fs.existsSync(DATA_FILE)) return;
@@ -74,6 +79,12 @@ const store = {
   refreshTokens: new Map(),
   /** @type {Map<string, { userId: string }>} idToken (Bearer) → مستخدم الجلسة */
   accessTokens: new Map(),
+  /** فريق الإدارة */
+  adminUsers: new Map(),
+  /** سجل تدقيق */
+  auditEvents: [],
+  /** مقاييس API */
+  apiMetrics: { routes: {}, recent: [] },
 };
 
 /** رموز OTP وإعداد الحساب (ذاكرة — تُعاد إرسالها عند الحاجة) */
@@ -132,6 +143,19 @@ function loadStore() {
     } else {
       store.accessTokens = new Map();
     }
+    if (data.adminUsers && typeof data.adminUsers === 'object') {
+      store.adminUsers = new Map(Object.entries(data.adminUsers));
+    } else {
+      store.adminUsers = new Map();
+    }
+    if (Array.isArray(data.auditEvents)) {
+      store.auditEvents = data.auditEvents;
+    } else {
+      store.auditEvents = [];
+    }
+    if (data.apiMetrics && typeof data.apiMetrics === 'object') {
+      store.apiMetrics = data.apiMetrics;
+    }
     const catalogN = store.catalogItems.size;
     const videoN = store.videos.size;
     console.log(
@@ -158,6 +182,9 @@ function saveStore() {
       videoComments: store.videoComments,
       messages: store.messages,
       accessTokens: Object.fromEntries(store.accessTokens),
+      adminUsers: Object.fromEntries(store.adminUsers),
+      auditEvents: store.auditEvents,
+      apiMetrics: store.apiMetrics,
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
@@ -166,10 +193,23 @@ function saveStore() {
 }
 
 ensureDataMigrated();
+if (!fs.existsSync(VERIFICATION_DIR)) {
+  fs.mkdirSync(VERIFICATION_DIR, { recursive: true });
+}
 loadStore();
 
 // توليد معرف فريد
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+
+const adminCtx = {
+  store,
+  saveStore,
+  id,
+  roles,
+  verificationDir: VERIFICATION_DIR,
+  adminJwtSecret: ADMIN_JWT_SECRET,
+};
+seedSuperAdmin(adminCtx);
 
 function otpSixDigits() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -216,8 +256,43 @@ const token = () => `tk_${id()}`;
 app.use(cors());
 app.use(express.json());
 
-// ملفات ثابتة (لوحة الإدارة)
+// مقاييس زمن استجابة API
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    if (!req.path.startsWith('/admin/v2') && req.path === '/health') return;
+    const ms = Date.now() - start;
+    const key = `${req.method} ${req.route?.path || req.path}`;
+    if (!store.apiMetrics.routes[key]) {
+      store.apiMetrics.routes[key] = { count: 0, totalMs: 0, maxMs: 0, errors: 0 };
+    }
+    const r = store.apiMetrics.routes[key];
+    r.count++;
+    r.totalMs += ms;
+    r.maxMs = Math.max(r.maxMs, ms);
+    if (res.statusCode >= 400) r.errors++;
+    if (!Array.isArray(store.apiMetrics.recent)) store.apiMetrics.recent = [];
+    store.apiMetrics.recent.unshift({
+      at: new Date().toISOString(),
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      ms,
+    });
+    if (store.apiMetrics.recent.length > 500) store.apiMetrics.recent.length = 500;
+  });
+  next();
+});
+
+// ملفات ثابتة (لوحة الإدارة القديمة + الجديدة)
 app.use(express.static(path.join(__dirname, 'public')));
+const adminConsoleDir = path.join(__dirname, 'public', 'admin-console');
+if (fs.existsSync(adminConsoleDir)) {
+  app.use('/console', express.static(adminConsoleDir));
+  app.get('/console/*', (req, res) => {
+    res.sendFile(path.join(adminConsoleDir, 'index.html'));
+  });
+}
 
 // تسجيل كل طلب وارد (للتشخيص: هل الطلب يصل من الآيفون؟)
 app.use((req, res, next) => {
@@ -295,6 +370,10 @@ function requireSessionUser(req, res, next) {
   store.users.set(req.authUserId, req.authUser);
   next();
 }
+
+// لوحة الإدارة v2 API
+app.use('/admin/v2', createAdminRouter(adminCtx));
+registerAppVerificationRoutes(app, adminCtx, auth, requireSessionUser);
 
 // ========== Auth ==========
 app.post('/auth/register', (req, res) => {
@@ -721,6 +800,8 @@ app.post('/services', auth, requireSessionUser, (req, res) => {
   const serviceType = String(req.body?.type || req.body?.serviceType || '').trim();
   const err = roles.assertServiceCreate(req.authUser, serviceType);
   if (err) return res.status(403).json({ message: err });
+  const verifyErr = roles.assertMerchantVerified(req.authUser);
+  if (verifyErr) return res.status(403).json({ message: verifyErr });
   const serviceId = id();
   const service = {
     id: serviceId,
@@ -861,6 +942,8 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
   }
   const roleErr = roles.assertCatalogCreate(req.authUser, category);
   if (roleErr) return res.status(403).json({ message: roleErr });
+  const verifyErr = roles.assertMerchantVerified(req.authUser);
+  if (verifyErr) return res.status(403).json({ message: verifyErr });
   if (!body.name || !String(body.name).trim()) {
     return res.status(400).json({ message: 'اسم المنتج مطلوب' });
   }
@@ -1542,8 +1625,11 @@ app.post('/messages', auth, requireSessionUser, (req, res) => {
 });
 
 // ========== إدارة - لوحة التحكم وتصدير البيانات ==========
-// لوحة إدارة تفاعلية: افتح في المتصفح http://localhost:4000/admin
+// لوحة الإدارة — التوجيه للوحة الاحترافية الجديدة
 app.get('/admin', (req, res) => {
+  if (fs.existsSync(adminConsoleDir)) {
+    return res.redirect('/console/');
+  }
   res.redirect('/admin.html');
 });
 

@@ -115,6 +115,10 @@ function migrateLegacyUser(user) {
   user.accountRole = accountRole;
   user.userType = legacy || accountRole;
   user.capabilities = capabilitiesForRole(accountRole);
+  if (requiresMerchantVerification(accountRole) && !user.verificationStatus) {
+    user.verificationStatus = 'none';
+  }
+  if (!user.verificationDocuments) user.verificationDocuments = [];
   if (!user.allowedSpecies || !user.allowedSpecies.length) {
     user.allowedSpecies =
       user.advertiserSpecies && user.advertiserSpecies.length
@@ -263,9 +267,13 @@ function publicUser(user) {
 function buildUserFromOnboarding({ phone, accountRole, name, city, allowedSpecies, businessType }) {
   const userId = null; // assigned by caller
   const role = ACCOUNT_ROLES[accountRole] ? accountRole : ACCOUNT_ROLES.buyer;
+  const needsVerify = requiresMerchantVerification(role);
   return {
     phone,
     accountRole: role,
+    verificationStatus: needsVerify ? 'none' : 'approved',
+    verificationDocuments: [],
+    verificationNote: '',
     userType: legacyUserTypeFromRole(role),
     name: String(name || '').trim(),
     city: String(city || '').trim(),
@@ -315,6 +323,32 @@ function isValidAccountRole(role) {
   return Boolean(role && ACCOUNT_ROLES[role]);
 }
 
+const MERCHANT_ROLES_REQUIRING_VERIFICATION = [
+  ACCOUNT_ROLES.feed_merchant,
+  ACCOUNT_ROLES.supplies_merchant,
+  ACCOUNT_ROLES.equipment_dealer,
+  ACCOUNT_ROLES.vet_clinic,
+  ACCOUNT_ROLES.transport_provider,
+];
+
+function requiresMerchantVerification(role) {
+  return MERCHANT_ROLES_REQUIRING_VERIFICATION.includes(role);
+}
+
+function assertMerchantVerified(user) {
+  const u = migrateLegacyUser({ ...user });
+  if (!requiresMerchantVerification(u.accountRole)) return null;
+  const st = u.verificationStatus || 'none';
+  if (st === 'approved') return null;
+  if (st === 'pending') {
+    return 'حسابك قيد المراجعة — سيتم تفعيل النشر بعد موافقة الإدارة';
+  }
+  if (st === 'rejected') {
+    return u.verificationNote || 'تم رفض التحقق — راجع المستندات أو تواصل مع الدعم';
+  }
+  return 'يجب رفع مستندات التحقق وانتظار موافقة الإدارة قبل النشر';
+}
+
 module.exports = {
   ACCOUNT_ROLES,
   ALL_SPECIES,
@@ -333,4 +367,7 @@ module.exports = {
   buildUserFromOnboarding,
   legacyUserTypeFromRole,
   isValidAccountRole,
+  requiresMerchantVerification,
+  assertMerchantVerified,
+  MERCHANT_ROLES_REQUIRING_VERIFICATION,
 };
