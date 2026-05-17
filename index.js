@@ -418,11 +418,24 @@ app.post('/auth/login', (req, res) => {
   res.json(issueAuthForUser(migrated));
 });
 
+const countries = require('./countries');
+
 // ========== Auth: جوال + OTP ==========
+app.get('/auth/countries', (_req, res) => {
+  res.json({
+    defaultCountry: countries.DEFAULT_COUNTRY,
+    countries: countries.listCountries(),
+  });
+});
+
 app.post('/auth/otp/send', (req, res) => {
-  const phone = roles.normalizePhone(req.body?.phone);
+  const countryCode = String(req.body?.countryCode || countries.DEFAULT_COUNTRY).toUpperCase();
+  const phone = roles.normalizePhone(req.body?.phone, countryCode);
   if (!phone) {
-    return res.status(400).json({ message: 'رقم الجوال غير صالح (مثال: 05xxxxxxxx)' });
+    const c = countries.getCountry(countryCode);
+    return res.status(400).json({
+      message: `رقم الجوال غير صالح (${c.placeholder})`,
+    });
   }
   const code = otpSixDigits();
   otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
@@ -435,7 +448,8 @@ app.post('/auth/otp/send', (req, res) => {
 });
 
 app.post('/auth/otp/verify', (req, res) => {
-  const phone = roles.normalizePhone(req.body?.phone);
+  const countryCode = String(req.body?.countryCode || countries.DEFAULT_COUNTRY).toUpperCase();
+  const phone = roles.normalizePhone(req.body?.phone, countryCode);
   const code = String(req.body?.code || '').trim();
   if (!phone || code.length < 4) {
     return res.status(400).json({ message: 'رقم الجوال ورمز التحقق مطلوبان' });
@@ -455,11 +469,16 @@ app.post('/auth/otp/verify', (req, res) => {
     return res.json(issueAuthForUser(migrated));
   }
   const setupToken = token();
-  setupTokens.set(setupToken, { phone, expiresAt: Date.now() + SETUP_TTL_MS });
+  setupTokens.set(setupToken, {
+    phone,
+    countryCode,
+    expiresAt: Date.now() + SETUP_TTL_MS,
+  });
   res.json({
     isNewUser: true,
     setupToken,
     phone,
+    countryCode,
     message: 'اختر نوع الحساب لإكمال التسجيل',
   });
 });
@@ -481,6 +500,7 @@ app.post('/auth/onboarding/complete', (req, res) => {
   const userId = id();
   const user = roles.buildUserFromOnboarding({
     phone: pending.phone,
+    countryCode: pending.countryCode || countries.DEFAULT_COUNTRY,
     accountRole,
     name: req.body?.name,
     city: req.body?.city,

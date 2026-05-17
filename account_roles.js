@@ -125,6 +125,12 @@ function migrateLegacyUser(user) {
         ? user.advertiserSpecies
         : defaultSpeciesForRole(accountRole);
   }
+  if (!user.countryCode) {
+    user.countryCode = countries.DEFAULT_COUNTRY;
+    const c = countries.getCountry(user.countryCode);
+    user.country = user.country || c.nameAr;
+    user.dialCode = user.dialCode || c.dialCode;
+  }
   return user;
 }
 
@@ -134,17 +140,10 @@ function hasCapability(user, cap) {
   return list.includes(cap);
 }
 
-function normalizePhone(phone) {
-  let digits = String(phone || '').replace(/\D/g, '');
-  if (digits.startsWith('966')) digits = digits.slice(3);
-  if (digits.startsWith('0')) digits = digits.slice(1);
-  if (digits.length === 9 && digits.startsWith('5')) {
-    return '+966' + digits;
-  }
-  if (digits.length >= 10 && digits.length <= 15) {
-    return '+' + digits;
-  }
-  return null;
+const countries = require('./countries');
+
+function normalizePhone(phone, countryCode) {
+  return countries.normalizePhone(phone, countryCode);
 }
 
 function speciesAllowed(user, species) {
@@ -264,12 +263,25 @@ function publicUser(user) {
   return rest;
 }
 
-function buildUserFromOnboarding({ phone, accountRole, name, city, allowedSpecies, businessType }) {
+function buildUserFromOnboarding({
+  phone,
+  accountRole,
+  name,
+  city,
+  allowedSpecies,
+  businessType,
+  countryCode,
+}) {
   const userId = null; // assigned by caller
   const role = ACCOUNT_ROLES[accountRole] ? accountRole : ACCOUNT_ROLES.buyer;
   const needsVerify = requiresMerchantVerification(role);
+  const cc = countryCode || countries.DEFAULT_COUNTRY;
+  const c = countries.getCountry(cc);
   return {
     phone,
+    countryCode: cc,
+    country: c.nameAr,
+    dialCode: c.dialCode,
     accountRole: role,
     verificationStatus: needsVerify ? 'none' : 'approved',
     verificationDocuments: [],
