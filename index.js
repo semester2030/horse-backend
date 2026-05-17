@@ -267,6 +267,35 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ========== Middleware: التحقق من التوكن (يجب تعريفه قبل المسارات التي تستخدمه) ==========
+const auth = (req, res, next) => {
+  const h = req.headers.authorization;
+  const t = h && h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!t) {
+    return res.status(401).json({ message: 'المصادقة مطلوبة' });
+  }
+  req.token = t;
+  next();
+};
+
+/** يثبت هوية حامل التوكن (يجب أن يكون idToken صادراً عن تسجيل الدخول / التجديد) */
+function requireSessionUser(req, res, next) {
+  const entry = store.accessTokens.get(req.token);
+  if (!entry || !entry.userId) {
+    return res.status(401).json({
+      message: 'توكن الجلسة غير معروف — أعد تسجيل الدخول لاستخدام الرسائل أو تحديث الحجوزات',
+    });
+  }
+  req.authUserId = String(entry.userId);
+  const raw = store.users.get(req.authUserId);
+  if (!raw) {
+    return res.status(401).json({ message: 'المستخدم غير موجود — أعد تسجيل الدخول' });
+  }
+  req.authUser = roles.migrateLegacyUser({ ...raw });
+  store.users.set(req.authUserId, req.authUser);
+  next();
+}
+
 // ========== Auth ==========
 app.post('/auth/register', (req, res) => {
   const { email, password } = req.body || {};
@@ -456,35 +485,6 @@ app.post('/auth/refresh', (req, res) => {
     expires_in: 3600,
   });
 });
-
-// ========== Middleware: التحقق من التوكن ==========
-const auth = (req, res, next) => {
-  const h = req.headers.authorization;
-  const t = h && h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!t) {
-    return res.status(401).json({ message: 'المصادقة مطلوبة' });
-  }
-  req.token = t;
-  next();
-};
-
-/** يثبت هوية حامل التوكن (يجب أن يكون idToken صادراً عن تسجيل الدخول / التجديد) */
-function requireSessionUser(req, res, next) {
-  const entry = store.accessTokens.get(req.token);
-  if (!entry || !entry.userId) {
-    return res.status(401).json({
-      message: 'توكن الجلسة غير معروف — أعد تسجيل الدخول لاستخدام الرسائل أو تحديث الحجوزات',
-    });
-  }
-  req.authUserId = String(entry.userId);
-  const raw = store.users.get(req.authUserId);
-  if (!raw) {
-    return res.status(401).json({ message: 'المستخدم غير موجود — أعد تسجيل الدخول' });
-  }
-  req.authUser = roles.migrateLegacyUser({ ...raw });
-  store.users.set(req.authUserId, req.authUser);
-  next();
-}
 
 function sessionUserIdFromToken(t) {
   const entry = store.accessTokens.get(t);
