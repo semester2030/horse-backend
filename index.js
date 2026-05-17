@@ -44,6 +44,12 @@ const store = {
   favorites: new Map(),
   bookings: new Map(),
   services: new Map(),
+  /** منتجات الكتالوج — category: feed | supplies | equipment */
+  catalogItems: new Map(),
+  /** userId → { items: [{ catalogItemId, quantity, snapshot }] } */
+  carts: new Map(),
+  /** طلبات تجارة الأدوات (منفصلة عن bookings) */
+  orders: new Map(),
   videos: new Map(),
   videoComments: {}, // videoId -> [ { id, userId, text, createdAt } ]
   /** @type {{ id: string, fromUserId: string, toUserId: string, text: string, createdAt: string, read?: boolean }[]} */
@@ -72,6 +78,15 @@ function loadStore() {
     }
     if (data.services && typeof data.services === 'object') {
       store.services = new Map(Object.entries(data.services));
+    }
+    if (data.catalogItems && typeof data.catalogItems === 'object') {
+      store.catalogItems = new Map(Object.entries(data.catalogItems));
+    }
+    if (data.carts && typeof data.carts === 'object') {
+      store.carts = new Map(Object.entries(data.carts));
+    }
+    if (data.orders && typeof data.orders === 'object') {
+      store.orders = new Map(Object.entries(data.orders));
     }
     if (data.videos && typeof data.videos === 'object') {
       store.videos = new Map(Object.entries(data.videos));
@@ -109,6 +124,9 @@ function saveStore() {
       favorites: Object.fromEntries(store.favorites),
       bookings: Object.fromEntries(store.bookings),
       services: Object.fromEntries(store.services),
+      catalogItems: Object.fromEntries(store.catalogItems),
+      carts: Object.fromEntries(store.carts),
+      orders: Object.fromEntries(store.orders),
       videos: Object.fromEntries(store.videos),
       videoComments: store.videoComments,
       messages: store.messages,
@@ -475,10 +493,19 @@ app.patch('/bookings/:id', auth, (req, res) => {
 
 // ========== Services ==========
 app.get('/services', auth, (req, res) => {
-  const { type, providerId } = req.query;
+  const { type, providerId, species } = req.query;
   let list = [...store.services.values()];
   if (type) list = list.filter(s => s.type === type);
   if (providerId) list = list.filter(s => s.providerId === providerId);
+  const sp = species != null ? String(species).trim().toLowerCase() : '';
+  if (sp && sp !== 'all') {
+    list = list.filter((s) => {
+      const apps = s.applicableSpecies;
+      if (apps == null || (Array.isArray(apps) && apps.length === 0)) return true;
+      if (Array.isArray(apps)) return apps.includes(sp) || apps.includes('all');
+      return String(apps) === sp || String(apps) === 'all';
+    });
+  }
   res.json(list);
 });
 
@@ -505,9 +532,420 @@ app.delete('/services/:id', auth, (req, res) => {
   res.status(200).send();
 });
 
+// ========== Catalog (أعلاف + أدوات) ==========
+function parseSpeciesList(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+  const s = String(raw).trim().toLowerCase();
+  if (!s || s === 'all') return ['horse', 'camel', 'falcon'];
+  return [s];
+}
+
+function catalogMatchesSpecies(item, species) {
+  if (!species || species === 'all') return true;
+  const list = parseSpeciesList(item.applicableSpecies);
+  if (list.length === 0) return true;
+  return list.includes(species) || list.includes('all');
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function catalogLocation(item) {
+  const loc = item.location || {};
+  const lat = parseFloat(loc.lat);
+  const lng = parseFloat(loc.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, city: loc.city || '' };
+  const seller = store.users.get(String(item.sellerId || ''));
+  if (seller && seller.location) {
+    const sl = seller.location;
+    const slat = parseFloat(sl.lat);
+    const slng = parseFloat(sl.lng);
+    if (Number.isFinite(slat) && Number.isFinite(slng)) {
+      return { lat: slat, lng: slng, city: sl.city || seller.city || '' };
+    }
+  }
+  return null;
+}
+
+function enrichCatalogItem(item, clientLat, clientLng) {
+  const out = { ...item };
+  const loc = catalogLocation(item);
+  if (loc) {
+    out.location = { ...out.location, lat: loc.lat, lng: loc.lng, city: loc.city || out.location?.city };
+    if (clientLat != null && clientLng != null) {
+      out.distanceKm = Math.round(haversineKm(clientLat, clientLng, loc.lat, loc.lng) * 10) / 10;
+    }
+  }
+  return out;
+}
+
+app.get('/catalog/items', auth, (req, res) => {
+  const category = req.query.category != null ? String(req.query.category).trim() : '';
+  const species = req.query.species != null ? String(req.query.species).trim().toLowerCase() : '';
+  const subCategory = req.query.subCategory != null ? String(req.query.subCategory).trim() : '';
+  const sellerId = req.query.sellerId != null ? String(req.query.sellerId).trim() : '';
+  const clientLat = parseFloat(req.query.lat);
+  const clientLng = parseFloat(req.query.lng);
+  const hasClientLoc = Number.isFinite(clientLat) && Number.isFinite(clientLng);
+  const sort = String(req.query.sort || '');
+
+  let list = [...store.catalogItems.values()].filter((i) => (i.status || 'active') === 'active');
+  if (category) list = list.filter((i) => String(i.category || '') === category);
+  if (species && species !== 'all') list = list.filter((i) => catalogMatchesSpecies(i, species));
+  if (subCategory) {
+    list = list.filter((i) => String(i.subCategory || '').includes(subCategory));
+  }
+  if (sellerId) list = list.filter((i) => String(i.sellerId || '') === sellerId);
+
+  list = list.map((i) =>
+    enrichCatalogItem(i, hasClientLoc ? clientLat : null, hasClientLoc ? clientLng : null),
+  );
+
+  if (hasClientLoc && (sort === 'distance' || !sort)) {
+    list.sort((a, b) => (a.distanceKm ?? 99999) - (b.distanceKm ?? 99999));
+  } else {
+    list.sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return tb - ta;
+    });
+  }
+  res.json(list);
+});
+
+app.get('/catalog/items/:id', auth, (req, res) => {
+  const item = store.catalogItems.get(req.params.id);
+  if (!item) return res.status(404).json({ message: 'المنتج غير موجود' });
+  const clientLat = parseFloat(req.query.lat);
+  const clientLng = parseFloat(req.query.lng);
+  const hasClientLoc = Number.isFinite(clientLat) && Number.isFinite(clientLng);
+  res.json(
+    enrichCatalogItem(item, hasClientLoc ? clientLat : null, hasClientLoc ? clientLng : null),
+  );
+});
+
+app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
+  const body = req.body || {};
+  const category = String(body.category || '').trim();
+  if (category !== 'feed' && category !== 'supplies' && category !== 'equipment') {
+    return res.status(400).json({ message: 'category يجب أن يكون feed أو supplies أو equipment' });
+  }
+  if (!body.name || !String(body.name).trim()) {
+    return res.status(400).json({ message: 'اسم المنتج مطلوب' });
+  }
+  const itemId = id();
+  const item = {
+    id: itemId,
+    sellerId: req.authUserId,
+    category,
+    applicableSpecies: parseSpeciesList(body.applicableSpecies).length
+      ? parseSpeciesList(body.applicableSpecies)
+      : ['horse'],
+    subCategory: String(body.subCategory || '').trim(),
+    name: String(body.name).trim(),
+    description: String(body.description || '').trim(),
+    images: Array.isArray(body.images) ? body.images.map(String) : [],
+    price: Number(body.price) || 0,
+    currency: String(body.currency || 'SAR'),
+    unit: String(body.unit || '').trim(),
+    location: body.location && typeof body.location === 'object' ? body.location : {},
+    contactPhone: body.contactPhone ? String(body.contactPhone) : '',
+    contactWhatsapp: body.contactWhatsapp ? String(body.contactWhatsapp) : '',
+    condition: body.condition ? String(body.condition) : 'new',
+    inStock: body.inStock !== false,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  store.catalogItems.set(itemId, item);
+  saveStore();
+  res.status(201).json(item);
+});
+
+app.patch('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
+  const { id } = req.params;
+  const existing = store.catalogItems.get(id);
+  if (!existing) return res.status(404).json({ message: 'المنتج غير موجود' });
+  if (String(existing.sellerId || '') !== req.authUserId) {
+    return res.status(403).json({ message: 'غير مصرح بتعديل هذا المنتج' });
+  }
+  const updated = {
+    ...existing,
+    ...req.body,
+    id,
+    sellerId: existing.sellerId,
+    updatedAt: new Date().toISOString(),
+  };
+  if (req.body.applicableSpecies != null) {
+    updated.applicableSpecies = parseSpeciesList(req.body.applicableSpecies);
+  }
+  store.catalogItems.set(id, updated);
+  saveStore();
+  res.json(updated);
+});
+
+app.delete('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
+  const { id } = req.params;
+  const existing = store.catalogItems.get(id);
+  if (!existing) return res.status(404).json({ message: 'المنتج غير موجود' });
+  if (String(existing.sellerId || '') !== req.authUserId) {
+    return res.status(403).json({ message: 'غير مصرح بحذف هذا المنتج' });
+  }
+  store.catalogItems.delete(id);
+  saveStore();
+  res.status(200).json({ ok: true });
+});
+
+// ========== Cart ==========
+function getOrCreateCart(userId) {
+  let cart = store.carts.get(userId);
+  if (!cart) {
+    cart = { userId, items: [], updatedAt: new Date().toISOString() };
+    store.carts.set(userId, cart);
+  }
+  return cart;
+}
+
+app.get('/cart', auth, requireSessionUser, (req, res) => {
+  const cart = getOrCreateCart(req.authUserId);
+  res.json(cart);
+});
+
+app.post('/cart/items', auth, requireSessionUser, (req, res) => {
+  const { catalogItemId, quantity } = req.body || {};
+  const qty = Math.max(1, parseInt(quantity, 10) || 1);
+  const product = store.catalogItems.get(String(catalogItemId || ''));
+  if (!product || product.category !== 'supplies') {
+    return res.status(400).json({ message: 'المنتج غير موجود أو ليس من قسم الأدوات' });
+  }
+  if ((product.status || 'active') !== 'active' || product.inStock === false) {
+    return res.status(400).json({ message: 'المنتج غير متوفر' });
+  }
+  const cart = getOrCreateCart(req.authUserId);
+  const imageUrl =
+    Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : '';
+  const snapshot = {
+    name: product.name,
+    price: Number(product.price) || 0,
+    imageUrl,
+    sellerId: product.sellerId,
+    unit: product.unit || '',
+    subCategory: product.subCategory || '',
+  };
+  const idx = cart.items.findIndex((l) => l.catalogItemId === product.id);
+  if (idx >= 0) {
+    cart.items[idx].quantity += qty;
+    cart.items[idx].snapshot = snapshot;
+  } else {
+    cart.items.push({ catalogItemId: product.id, quantity: qty, snapshot });
+  }
+  cart.updatedAt = new Date().toISOString();
+  store.carts.set(req.authUserId, cart);
+  saveStore();
+  res.json(cart);
+});
+
+app.patch('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) => {
+  const cart = getOrCreateCart(req.authUserId);
+  const lineId = req.params.catalogItemId;
+  const qty = parseInt(req.body?.quantity, 10);
+  const idx = cart.items.findIndex((l) => l.catalogItemId === lineId);
+  if (idx < 0) return res.status(404).json({ message: 'العنصر غير موجود في السلة' });
+  if (!Number.isFinite(qty) || qty < 1) {
+    cart.items.splice(idx, 1);
+  } else {
+    cart.items[idx].quantity = qty;
+  }
+  cart.updatedAt = new Date().toISOString();
+  store.carts.set(req.authUserId, cart);
+  saveStore();
+  res.json(cart);
+});
+
+app.delete('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) => {
+  const cart = getOrCreateCart(req.authUserId);
+  cart.items = cart.items.filter((l) => l.catalogItemId !== req.params.catalogItemId);
+  cart.updatedAt = new Date().toISOString();
+  store.carts.set(req.authUserId, cart);
+  saveStore();
+  res.json(cart);
+});
+
+app.delete('/cart', auth, requireSessionUser, (req, res) => {
+  store.carts.set(req.authUserId, { userId: req.authUserId, items: [], updatedAt: new Date().toISOString() });
+  saveStore();
+  res.json(store.carts.get(req.authUserId));
+});
+
+// ========== Orders (أدوات — تجارة) ==========
+app.get('/orders', auth, requireSessionUser, (req, res) => {
+  const { providerId, customerId, status } = req.query;
+  let list = [...store.orders.values()];
+  const sid = req.authUserId;
+  if (providerId) {
+    if (String(providerId) !== sid) return res.status(403).json({ message: 'غير مصرح' });
+    list = list.filter((o) => String(o.sellerId || '') === sid);
+  } else if (customerId) {
+    if (String(customerId) !== sid) return res.status(403).json({ message: 'غير مصرح' });
+    list = list.filter((o) => String(o.userId || '') === sid);
+  } else {
+    list = list.filter(
+      (o) => String(o.userId || '') === sid || String(o.sellerId || '') === sid,
+    );
+  }
+  if (status) list = list.filter((o) => o.status === status);
+  list.sort((a, b) => {
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return tb - ta;
+  });
+  res.json(list);
+});
+
+app.get('/orders/:id', auth, requireSessionUser, (req, res) => {
+  const order = store.orders.get(req.params.id);
+  if (!order) return res.status(404).json({ message: 'الطلب غير موجود' });
+  const sid = req.authUserId;
+  if (String(order.userId || '') !== sid && String(order.sellerId || '') !== sid) {
+    return res.status(403).json({ message: 'غير مصرح' });
+  }
+  res.json(order);
+});
+
+app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
+  const cart = getOrCreateCart(req.authUserId);
+  if (!cart.items || cart.items.length === 0) {
+    return res.status(400).json({ message: 'السلة فارغة' });
+  }
+  const shippingAddress = req.body?.shippingAddress || {};
+  const paymentMethod = String(req.body?.paymentMethod || 'cash');
+  const buyer = store.users.get(req.authUserId) || {};
+  const customerName = String(buyer.name || buyer.displayName || buyer.email || 'عميل');
+  const customerPhone = String(buyer.phone || '');
+
+  const bySeller = new Map();
+  for (const line of cart.items) {
+    const seller = String(line.snapshot?.sellerId || '');
+    if (!bySeller.has(seller)) bySeller.set(seller, []);
+    bySeller.get(seller).push(line);
+  }
+
+  const created = [];
+  for (const [sellerId, lines] of bySeller.entries()) {
+    if (!sellerId) continue;
+    let total = 0;
+    const orderLines = lines.map((l) => {
+      const unit = Number(l.snapshot?.price) || 0;
+      total += unit * (l.quantity || 1);
+      return {
+        catalogItemId: l.catalogItemId,
+        quantity: l.quantity || 1,
+        title: l.snapshot?.name || '',
+        unitPrice: unit,
+        imageUrl: l.snapshot?.imageUrl || '',
+      };
+    });
+    const orderId = id();
+    const status = paymentMethod === 'card' ? 'pending_payment' : 'paid';
+    const order = {
+      id: orderId,
+      userId: req.authUserId,
+      sellerId,
+      customerName,
+      customerPhone,
+      lines: orderLines,
+      total: Math.round(total * 100) / 100,
+      currency: 'SAR',
+      status,
+      paymentMethod,
+      paymentStatus: status === 'paid' ? 'completed' : 'pending',
+      shippingAddress,
+      trackingNumber: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.orders.set(orderId, order);
+    created.push(order);
+  }
+
+  store.carts.set(req.authUserId, { userId: req.authUserId, items: [], updatedAt: new Date().toISOString() });
+  saveStore();
+  res.status(201).json({ orders: created });
+});
+
+app.patch('/orders/:id', auth, requireSessionUser, (req, res) => {
+  const { id } = req.params;
+  const existing = store.orders.get(id);
+  if (!existing) return res.status(404).json({ message: 'الطلب غير موجود' });
+  const sid = req.authUserId;
+  const isSeller = String(existing.sellerId || '') === sid;
+  const isCustomer = String(existing.userId || '') === sid;
+  if (!isSeller && !isCustomer) {
+    return res.status(403).json({ message: 'غير مصرح' });
+  }
+  const body = req.body || {};
+  if (isCustomer && body.status && body.status !== 'cancelled') {
+    return res.status(403).json({ message: 'يمكن للعميل الإلغاء فقط' });
+  }
+  const updated = {
+    ...existing,
+    ...body,
+    id,
+    userId: existing.userId,
+    sellerId: existing.sellerId,
+    updatedAt: new Date().toISOString(),
+  };
+  store.orders.set(id, updated);
+  saveStore();
+  res.json(updated);
+});
+
 // ========== Videos ==========
+function videoProviderCoords(video) {
+  const loc = video.location;
+  if (loc && typeof loc === 'object') {
+    const lat = parseFloat(loc.lat);
+    const lng = parseFloat(loc.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  }
+  const u = store.users.get(video.userId);
+  if (u && u.location && typeof u.location === 'object') {
+    const lat = parseFloat(u.location.lat);
+    const lng = parseFloat(u.location.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  }
+  return null;
+}
+
+function enrichVideoDistance(video, clientLat, clientLng) {
+  const out = { ...video };
+  const coords = videoProviderCoords(video);
+  if (
+    coords &&
+    Number.isFinite(clientLat) &&
+    Number.isFinite(clientLng)
+  ) {
+    out.distanceKm =
+      Math.round(
+        haversineKm(clientLat, clientLng, coords.lat, coords.lng) * 10,
+      ) / 10;
+  }
+  return out;
+}
+
 app.get('/videos', auth, (req, res) => {
-  const { type, q, sort, serviceCategory, targetSpecies } = req.query;
+  const { type, q, sort, serviceCategory, targetSpecies, subCategory } = req.query;
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
 
@@ -517,7 +955,8 @@ app.get('/videos', auth, (req, res) => {
     list = list.filter((v) => {
       const title = String(v.title ?? v.name ?? v.serviceName ?? '').toLowerCase();
       const desc = String(v.description ?? '').toLowerCase();
-      return title.includes(lower) || desc.includes(lower);
+      const sub = String(v.subCategory ?? '').toLowerCase();
+      return title.includes(lower) || desc.includes(lower) || sub.includes(lower);
     });
   }
 
@@ -526,6 +965,11 @@ app.get('/videos', auth, (req, res) => {
     list = list.filter(
       (v) => v.serviceCategory === cat || v.serviceType === cat,
     );
+  }
+
+  const subCat = subCategory != null ? String(subCategory).trim() : '';
+  if (subCat && subCat !== 'all') {
+    list = list.filter((v) => String(v.subCategory ?? '') === subCat);
   }
 
   const ts = targetSpecies != null ? String(targetSpecies) : '';
@@ -538,20 +982,38 @@ app.get('/videos', auth, (req, res) => {
     });
   }
 
-  list = list.map((v) => ({
-    ...v,
-    likes: v.likes ?? 0,
-    views: v.views ?? 0,
-    favorites: v.favorites ?? 0,
-    comments: v.comments ?? (store.videoComments[v.id] || []).length,
-  }));
+  const clientLat = parseFloat(req.query.lat);
+  const clientLng = parseFloat(req.query.lng);
+  const hasClient =
+    Number.isFinite(clientLat) && Number.isFinite(clientLng);
+
+  list = list.map((v) => {
+    let out = {
+      ...v,
+      likes: v.likes ?? 0,
+      views: v.views ?? 0,
+      favorites: v.favorites ?? 0,
+      comments: v.comments ?? (store.videoComments[v.id] || []).length,
+    };
+    if (hasClient) out = enrichVideoDistance(out, clientLat, clientLng);
+    return out;
+  });
 
   const sortKey = sort != null ? String(sort) : 'newest';
   const t = (x) => {
     const d = x.createdAt ? new Date(x.createdAt).getTime() : 0;
     return Number.isFinite(d) ? d : 0;
   };
-  if (sortKey === 'oldest') {
+  if (sortKey === 'distance' && hasClient) {
+    list.sort((a, b) => {
+      const da = a.distanceKm;
+      const db = b.distanceKm;
+      if (da == null && db == null) return t(b) - t(a);
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return da - db;
+    });
+  } else if (sortKey === 'oldest') {
     list.sort((a, b) => t(a) - t(b));
   } else if (sortKey === 'views_desc') {
     list.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
@@ -707,6 +1169,18 @@ app.get('/dashboard/summary', auth, requireSessionUser, (req, res) => {
   const servicesListed = [...store.services.values()].filter(
     (s) => String(s.providerId || '') === userId,
   ).length;
+  const catalogItemsListed = [...store.catalogItems.values()].filter(
+    (c) => String(c.sellerId || '') === userId && (c.status || 'active') === 'active',
+  ).length;
+  const asSellerOrders = [...store.orders.values()].filter(
+    (o) => String(o.sellerId || '') === userId,
+  );
+  const pendingSellerOrders = asSellerOrders.filter(
+    (o) => ['paid', 'preparing'].includes(String(o.status || '')),
+  ).length;
+  const completedOrderRevenue = asSellerOrders
+    .filter((o) => String(o.status || '') === 'delivered')
+    .reduce((sum, o) => sum + (Number(o.total) || 0), 0);
   const videosListed = [...store.videos.values()].filter(
     (v) => String(v.userId || '') === userId,
   ).length;
@@ -720,10 +1194,14 @@ app.get('/dashboard/summary', auth, requireSessionUser, (req, res) => {
     userId,
     horsesListed,
     servicesListed,
+    catalogItemsListed,
     videosListed,
     bookingsAsProvider: asProvider.length,
     bookingsAsCustomer: asCustomer.length,
     pendingProviderBookings,
+    ordersAsSeller: asSellerOrders.length,
+    pendingSellerOrders,
+    completedOrderRevenue,
     favoriteHorsesCount,
   });
 });
@@ -737,7 +1215,7 @@ app.get('/crm/leads', auth, requireSessionUser, (req, res) => {
   if (userId !== req.authUserId) {
     return res.status(403).json({ message: 'لا يمكن جلب طلبات مقدم خدمة آخر' });
   }
-  const leads = [...store.bookings.values()]
+  const bookingLeads = [...store.bookings.values()]
     .filter(
       (b) =>
         String(b.providerId || '') === userId &&
@@ -745,19 +1223,40 @@ app.get('/crm/leads', auth, requireSessionUser, (req, res) => {
     )
     .map((b) => ({
       id: b.id,
-      type: b.type,
+      source: 'booking',
+      type: b.type || b.serviceType,
       serviceName: b.serviceName,
       customerName: b.customerName,
       customerPhone: b.customerPhone,
       totalPrice: b.totalPrice,
       createdAt: b.createdAt,
       userId: b.userId,
-    }))
-    .sort((a, b) => {
-      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return tb - ta;
-    });
+    }));
+
+  const orderLeads = [...store.orders.values()]
+    .filter(
+      (o) =>
+        String(o.sellerId || '') === userId &&
+        ['paid', 'preparing'].includes(String(o.status || '')),
+    )
+    .map((o) => ({
+      id: o.id,
+      source: 'order',
+      type: 'supplies_order',
+      serviceName: `طلب أدوات (${(o.lines || []).length} صنف)`,
+      customerName: o.customerName || '',
+      customerPhone: o.customerPhone || '',
+      totalPrice: o.total,
+      createdAt: o.createdAt,
+      userId: o.userId,
+      status: o.status,
+    }));
+
+  const leads = [...bookingLeads, ...orderLeads].sort((a, b) => {
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return tb - ta;
+  });
   res.json(leads);
 });
 
