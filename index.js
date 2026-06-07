@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const roles = require('./account_roles');
+const { validateSheepListing } = require('./sheep_listing');
 
 let swaggerDocument;
 try {
@@ -701,6 +702,10 @@ app.post('/horses', auth, requireSessionUser, (req, res) => {
     'horse';
   const err = roles.assertListingCreate(req.authUser, species);
   if (err) return res.status(403).json({ message: err });
+  if (species === 'sheep') {
+    const sheepErr = validateSheepListing(req.body);
+    if (sheepErr) return res.status(400).json({ message: sheepErr });
+  }
   const horseId = id();
   const horse = {
     id: horseId,
@@ -718,6 +723,12 @@ app.patch('/horses/:id', auth, (req, res) => {
   const { id } = req.params;
   const existing = store.horses.get(id);
   if (!existing) return res.status(404).json({ message: 'الخيل غير موجود' });
+  const mergedSpecies =
+    req.body?.species || req.body?.listingSpecies || existing.species || 'horse';
+  if (mergedSpecies === 'sheep') {
+    const sheepErr = validateSheepListing({ ...existing, ...req.body });
+    if (sheepErr) return res.status(400).json({ message: sheepErr });
+  }
   const updated = { ...existing, ...req.body, id, updatedAt: new Date().toISOString() };
   if (req.body.stats && typeof req.body.stats === 'object') {
     updated.stats = { ...(existing.stats || {}), ...req.body.stats };

@@ -12,7 +12,7 @@ const ACCOUNT_ROLES = {
   transport_provider: 'transport_provider',
 };
 
-const ALL_SPECIES = ['horse', 'camel', 'falcon'];
+const ALL_SPECIES = ['horse', 'camel', 'falcon', 'sheep'];
 
 const ROLE_LABELS_AR = {
   buyer: 'مشتري',
@@ -207,7 +207,7 @@ function assertServiceCreate(user, serviceType) {
 
 function assertVideoCreate(user, serviceType) {
   const t = String(serviceType || '').trim();
-  if (!t || t === 'horse' || t === 'camel' || t === 'falcon') {
+  if (!t || t === 'horse' || t === 'camel' || t === 'falcon' || t === 'sheep') {
     return 'فيديو الإعلانات الحيوانية من شاشة الخريطة/الإعلانات';
   }
   const role = migrateLegacyUser({ ...user }).accountRole;
