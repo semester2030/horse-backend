@@ -1367,6 +1367,49 @@ app.get('/videos', auth, (req, res) => {
     list = list.filter((v) => parseInt(v.ageMonths, 10) === ageMonthsQ);
   }
 
+  const camelColorQ =
+    req.query.camelColor != null ? String(req.query.camelColor).trim() : '';
+  if (camelColorQ) {
+    list = list.filter((v) => {
+      const c = String(v.camelColor || v.breed || '').trim();
+      return c === camelColorQ;
+    });
+  }
+
+  const camelAgeGradeQ =
+    req.query.camelAgeGrade != null ? String(req.query.camelAgeGrade).trim() : '';
+  if (camelAgeGradeQ) {
+    list = list.filter(
+      (v) => String(v.camelAgeGrade || v.age || '').trim() === camelAgeGradeQ,
+    );
+  }
+
+  const herdCountQ = parseInt(req.query.herdCount, 10);
+  if (Number.isFinite(herdCountQ)) {
+    list = list.filter((v) => parseInt(v.herdCount, 10) === herdCountQ);
+  }
+
+  const coatColorQ =
+    req.query.coatColor != null ? String(req.query.coatColor).trim() : '';
+  if (coatColorQ) {
+    list = list.filter((v) => String(v.coatColor || '').trim() === coatColorQ);
+  }
+
+  const ageYearsQ = req.query.age != null ? String(req.query.age).trim() : '';
+  if (ageYearsQ && !Number.isFinite(ageMonthsQ)) {
+    list = list.filter((v) => String(v.age || '').trim() === ageYearsQ);
+  }
+
+  const genderQ = req.query.gender != null ? String(req.query.gender).trim() : '';
+  if (genderQ) {
+    list = list.filter((v) => String(v.gender || '').trim() === genderQ);
+  }
+
+  const cityQ = req.query.city != null ? String(req.query.city).trim() : '';
+  if (cityQ) {
+    list = list.filter((v) => String(v.city || '').trim() === cityQ);
+  }
+
   const qq = q != null ? String(q).trim() : '';
   if (qq) {
     const lower = qq.toLowerCase();
