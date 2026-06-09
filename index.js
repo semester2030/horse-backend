@@ -1305,11 +1305,81 @@ app.patch('/orders/:id', auth, requireSessionUser, (req, res) => {
 });
 
 // ========== Videos ==========
+const VIDEO_SA_LAT_MIN = 16.0;
+const VIDEO_SA_LAT_MAX = 32.5;
+const VIDEO_SA_LNG_MIN = 34.5;
+const VIDEO_SA_LNG_MAX = 56.0;
+const VIDEO_MAX_ACCURACY_M = 150;
+const VIDEO_MAX_CAPTURE_AGE_MS = 30 * 60 * 1000;
+
+function parseVideoLocationRaw(body) {
+  const loc = body?.location;
+  if (!loc || typeof loc !== 'object') return null;
+  const lat = parseFloat(loc.lat ?? loc.latitude);
+  const lng = parseFloat(loc.lng ?? loc.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    lat,
+    lng,
+    city: String(loc.city || body.city || '').trim(),
+    address: String(loc.address || '').trim(),
+    accuracyM: parseFloat(loc.accuracyM),
+    capturedAt: loc.capturedAt || null,
+    source: String(loc.source || 'gps_confirmed').trim(),
+  };
+}
+
+function validateVideoLocation(body) {
+  const parsed = parseVideoLocationRaw(body);
+  if (!parsed) {
+    return 'الموقع إلزامي — فعّل GPS وحدّد موقع التصوير على الخريطة';
+  }
+  if (
+    parsed.lat < VIDEO_SA_LAT_MIN ||
+    parsed.lat > VIDEO_SA_LAT_MAX ||
+    parsed.lng < VIDEO_SA_LNG_MIN ||
+    parsed.lng > VIDEO_SA_LNG_MAX
+  ) {
+    return 'الإحداثيات خارج نطاق المملكة';
+  }
+  if (Number.isFinite(parsed.accuracyM) && parsed.accuracyM > VIDEO_MAX_ACCURACY_M) {
+    return `دقة GPS ضعيفة (${Math.round(parsed.accuracyM)}م) — انتقل لمكان مفتوح وحاول مجدداً`;
+  }
+  if (parsed.capturedAt) {
+    const ts = new Date(parsed.capturedAt).getTime();
+    if (Number.isFinite(ts) && Date.now() - ts > VIDEO_MAX_CAPTURE_AGE_MS) {
+      return 'انتهت صلاحية موقع التصوير — حدّد الموقع مجدداً';
+    }
+  }
+  return null;
+}
+
+function normalizeVideoLocation(body) {
+  const parsed = parseVideoLocationRaw(body);
+  if (!parsed) return null;
+  const trust =
+    Number.isFinite(parsed.accuracyM) && parsed.accuracyM <= 50
+      ? 'verified'
+      : 'approximate';
+  return {
+    lat: parsed.lat,
+    lng: parsed.lng,
+    city: parsed.city || String(body.city || '').trim(),
+    address: parsed.address,
+    accuracyM: Number.isFinite(parsed.accuracyM)
+      ? Math.round(parsed.accuracyM)
+      : null,
+    capturedAt: parsed.capturedAt || new Date().toISOString(),
+    source: parsed.source || 'gps_confirmed',
+    locationTrust: trust,
+  };
+}
+
 function videoProviderCoords(video) {
   const loc = video.location;
   if (loc && typeof loc === 'object') {
-    const lat = parseFloat(loc.lat);
-    const lng = parseFloat(loc.lng);
+    const lat = parseFloat(loc.lat ?? loc.latitude);
+    const lng = parseFloat(loc.lng ?? loc.longitude);
     if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
   }
   const u = store.users.get(video.userId);
@@ -1498,10 +1568,17 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
     const verifyErr = roles.assertMerchantVerified(req.authUser);
     if (verifyErr) return res.status(403).json({ message: verifyErr });
   }
+
+  const locErr = validateVideoLocation(req.body);
+  if (locErr) return res.status(400).json({ message: locErr });
+  const normalizedLocation = normalizeVideoLocation(req.body);
+
   const videoId = req.body.cloudflareVideoId || id();
   const video = {
     id: videoId,
     ...req.body,
+    location: normalizedLocation,
+    city: normalizedLocation?.city || req.body.city || '',
     userId: req.body.userId || req.authUserId,
     createdAt: new Date().toISOString(),
     likes: req.body.likes ?? 0,
