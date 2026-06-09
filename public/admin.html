@@ -135,6 +135,16 @@
       </div>
       <div id="content-horses" class="tab-content">
         <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="p-4 flex gap-3 items-center border-b border-gray-100">
+            <label class="text-sm text-slate-600">فئة الإعلان:</label>
+            <select id="horses-species-filter" class="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              <option value="">الكل</option>
+              <option value="horse">خيل</option>
+              <option value="camel">إبل</option>
+              <option value="falcon">صقور</option>
+              <option value="sheep">أغنام</option>
+            </select>
+          </div>
           <div class="overflow-x-auto">
             <table id="table-horses"><thead></thead><tbody></tbody></table>
           </div>
@@ -142,6 +152,16 @@
       </div>
       <div id="content-videos" class="tab-content">
         <div class="bg-white rounded-xl shadow overflow-hidden">
+          <div class="p-4 flex gap-3 items-center border-b border-gray-100">
+            <label class="text-sm text-slate-600">نوع الفيديو:</label>
+            <select id="videos-type-filter" class="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              <option value="">الكل</option>
+              <option value="horse">خيل</option>
+              <option value="camel">إبل</option>
+              <option value="falcon">صقور</option>
+              <option value="sheep">أغنام</option>
+            </select>
+          </div>
           <div class="overflow-x-auto">
             <table id="table-videos"><thead></thead><tbody></tbody></table>
           </div>
@@ -296,11 +316,16 @@
         </tr>
       `, true);
 
-      const horses = objToArr(DATA.horses);
-      renderTable('table-horses', ['الاسم', 'النوع', 'العمر', 'الجنس', 'السعر', 'المدينة', 'المالك'], horses, h => `
+      const horsesSpecies = document.getElementById('horses-species-filter')?.value || '';
+      let horses = objToArr(DATA.horses);
+      if (horsesSpecies) {
+        horses = horses.filter(h => (h.species || h.type || 'horse') === horsesSpecies);
+      }
+      renderTable('table-horses', ['الاسم', 'الفئة', 'النوع', 'العمر', 'الجنس', 'السعر', 'المدينة', 'المالك'], horses, h => `
         <tr>
           <td>${escapeHtml(h.name || '—')}</td>
-          <td>${escapeHtml(h.type || '—')}</td>
+          <td>${escapeHtml(h.species || h.type || 'horse')}</td>
+          <td>${escapeHtml(h.breed || h.type || '—')}</td>
           <td>${h.age ?? '—'}</td>
           <td>${h.gender === 'male' ? 'ذكر' : h.gender === 'female' ? 'أنثى' : (h.gender || '—')}</td>
           <td>${typeof h.price === 'number' ? h.price.toLocaleString('ar-SA') + ' ريال' : (h.price || '—')}</td>
@@ -310,7 +335,11 @@
         </tr>
       `, true);
 
-      const videos = objToArr(DATA.videos);
+      const videosType = document.getElementById('videos-type-filter')?.value || '';
+      let videos = objToArr(DATA.videos);
+      if (videosType) {
+        videos = videos.filter(v => (v.type || '') === videosType);
+      }
       renderTable('table-videos', ['المعرف', 'النوع', 'المشاهدات', 'الإعجابات', 'التعليقات'], videos, v => `
         <tr>
           <td class="font-mono text-sm">${escapeHtml((v.id || '').slice(0, 16))}…</td>
@@ -397,6 +426,9 @@
     });
 
     document.getElementById('btn-refresh').addEventListener('click', () => loadData());
+
+    document.getElementById('horses-species-filter')?.addEventListener('change', () => renderAllTables());
+    document.getElementById('videos-type-filter')?.addEventListener('change', () => renderAllTables());
 
     async function doLogin() {
       const key = document.getElementById('admin-key-input').value.trim();

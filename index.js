@@ -12,6 +12,13 @@ const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const roles = require('./account_roles');
 const { validateSheepListing } = require('./sheep_listing');
+const { registerAccountLifecycleRoutes } = require('./account_lifecycle');
+const {
+  registerContentModerationRoutes,
+  isTargetHiddenForUser,
+  isUserBlocked,
+  ensureModerationStore,
+} = require('./content_moderation');
 
 let swaggerDocument;
 try {
@@ -77,6 +84,8 @@ const store = {
   videoComments: {}, // videoId -> [ { id, userId, text, createdAt } ]
   /** @type {{ id: string, fromUserId: string, toUserId: string, text: string, createdAt: string, read?: boolean }[]} */
   messages: [],
+  /** @type {{ id: string, reporterId: string, targetType: string, targetId: string, reason: string, status: string, createdAt: string }[]} */
+  contentReports: [],
   refreshTokens: new Map(),
   /** @type {Map<string, { userId: string }>} idToken (Bearer) → مستخدم الجلسة */
   accessTokens: new Map(),
@@ -140,6 +149,11 @@ function loadStore() {
     } else {
       store.messages = [];
     }
+    if (Array.isArray(data.contentReports)) {
+      store.contentReports = data.contentReports;
+    } else {
+      store.contentReports = [];
+    }
     if (data.accessTokens && typeof data.accessTokens === 'object') {
       store.accessTokens = new Map(
         Object.entries(data.accessTokens).map(([k, v]) => [
@@ -192,6 +206,7 @@ function saveStore() {
       adminUsers: Object.fromEntries(store.adminUsers),
       auditEvents: store.auditEvents,
       apiMetrics: store.apiMetrics,
+      contentReports: store.contentReports,
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
@@ -200,6 +215,7 @@ function saveStore() {
 }
 
 ensureDataMigrated();
+ensureModerationStore(store);
 if (!fs.existsSync(VERIFICATION_DIR)) {
   fs.mkdirSync(VERIFICATION_DIR, { recursive: true });
 }
@@ -381,6 +397,36 @@ function requireSessionUser(req, res, next) {
 // لوحة الإدارة v2 API
 app.use('/admin/v2', createAdminRouter(adminCtx));
 registerAppVerificationRoutes(app, adminCtx, auth, requireSessionUser);
+registerAccountLifecycleRoutes(app, { store, saveStore, auth, requireSessionUser });
+registerContentModerationRoutes(app, { store, saveStore, id, auth, requireSessionUser });
+
+function viewerFromToken(req) {
+  const entry = store.accessTokens.get(req.token);
+  if (!entry?.userId) return null;
+  return store.users.get(String(entry.userId)) || null;
+}
+
+function filterListingsForViewer(list, viewer) {
+  let out = list.filter((h) => !h.hidden && h.status !== 'removed');
+  if (!viewer) return out;
+  return out.filter((h) => {
+    const ownerId = h.userId || h.ownerId || h.sellerId;
+    if (isUserBlocked(viewer, ownerId)) return false;
+    if (isTargetHiddenForUser(viewer, 'listing', h.id)) return false;
+    return true;
+  });
+}
+
+function filterVideosForViewer(list, viewer) {
+  let out = list.filter((v) => !v.hidden && v.status !== 'removed');
+  if (!viewer) return out;
+  return out.filter((v) => {
+    const ownerId = v.userId || v.ownerId;
+    if (isUserBlocked(viewer, ownerId)) return false;
+    if (isTargetHiddenForUser(viewer, 'video', v.id)) return false;
+    return true;
+  });
+}
 
 // ========== Auth ==========
 app.post('/auth/register', (req, res) => {
@@ -685,6 +731,7 @@ app.get('/horses', (req, res) => {
   if (sortBy === 'price_asc') list.sort((a, b) => Number(a.price) - Number(b.price));
   if (sortBy === 'price_desc') list.sort((a, b) => Number(b.price) - Number(a.price));
   if (limit) list = list.slice(0, Number(limit));
+  list = filterListingsForViewer(list, viewerFromToken(req));
   res.json(list);
 });
 
@@ -1295,6 +1342,31 @@ app.get('/videos', auth, (req, res) => {
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
 
+  const sheepSub = req.query.sheepSubCategory != null
+    ? String(req.query.sheepSubCategory).trim().toLowerCase()
+    : '';
+  if (sheepSub) {
+    list = list.filter((v) => {
+      const sub = String(v.sheepSubCategory || '').trim().toLowerCase();
+      const purpose = String(v.purpose || '').trim().toLowerCase();
+      if (sub === sheepSub) return true;
+      if (sheepSub === 'mandi' && purpose === 'mandi') return true;
+      return false;
+    });
+  }
+
+  const breedQ = req.query.breed != null ? String(req.query.breed).trim() : '';
+  if (breedQ) {
+    list = list.filter(
+      (v) => String(v.breed || v.type || '').trim() === breedQ,
+    );
+  }
+
+  const ageMonthsQ = parseInt(req.query.ageMonths, 10);
+  if (Number.isFinite(ageMonthsQ)) {
+    list = list.filter((v) => parseInt(v.ageMonths, 10) === ageMonthsQ);
+  }
+
   const qq = q != null ? String(q).trim() : '';
   if (qq) {
     const lower = qq.toLowerCase();
@@ -1369,6 +1441,7 @@ app.get('/videos', auth, (req, res) => {
     list.sort((a, b) => t(b) - t(a));
   }
 
+  list = filterVideosForViewer(list, viewerFromToken(req));
   res.json(list);
 });
 

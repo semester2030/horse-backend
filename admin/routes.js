@@ -758,6 +758,36 @@ function createAdminRouter(ctx) {
     });
   });
 
+  // ——— Content reports (UGC) ———
+  router.get('/content-reports', requireAdminAuth, requirePerm('content:moderate'), (req, res) => {
+    if (!Array.isArray(ctx.store.contentReports)) ctx.store.contentReports = [];
+    let list = [...ctx.store.contentReports];
+    if (req.query.status) {
+      list = list.filter((r) => r.status === req.query.status);
+    }
+    list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(paginate(list, req.query.page, req.query.limit));
+  });
+
+  router.patch('/content-reports/:id', requireAdminAuth, requirePerm('content:moderate'), (req, res) => {
+    if (!Array.isArray(ctx.store.contentReports)) ctx.store.contentReports = [];
+    const report = ctx.store.contentReports.find((r) => r.id === req.params.id);
+    if (!report) return res.status(404).json({ message: 'البلاغ غير موجود' });
+    if (req.body.status) report.status = req.body.status;
+    if (req.body.adminNote) report.adminNote = String(req.body.adminNote).slice(0, 500);
+    report.resolvedAt = new Date().toISOString();
+    report.resolvedBy = req.adminUserId;
+    ctx.saveStore();
+    logAudit(ctx, {
+      actorId: req.adminUserId,
+      actorName: req.adminUser.name,
+      action: 'content_report.resolve',
+      entityType: 'content_report',
+      entityId: report.id,
+    });
+    res.json(report);
+  });
+
   return router;
 }
 
