@@ -1412,6 +1412,20 @@ app.get('/videos', auth, (req, res) => {
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
 
+  const heritageTypes = ['horse', 'camel', 'falcon', 'sheep'];
+  if (type && heritageTypes.includes(String(type))) {
+    list = list.filter((v) => {
+      if (v.type !== type) return false;
+      const sp = String(v.species || '').trim();
+      if (sp && sp !== type) return false;
+      return true;
+    });
+  }
+
+  if (type === 'service') {
+    list = list.filter((v) => v.type === 'service');
+  }
+
   const sheepSub = req.query.sheepSubCategory != null
     ? String(req.query.sheepSubCategory).trim().toLowerCase()
     : '';
@@ -1498,6 +1512,17 @@ app.get('/videos', auth, (req, res) => {
     );
   }
 
+  const excludeCat =
+    req.query.excludeServiceCategory != null
+      ? String(req.query.excludeServiceCategory).trim()
+      : '';
+  if (excludeCat) {
+    list = list.filter(
+      (v) =>
+        String(v.serviceCategory || v.serviceType || '') !== excludeCat,
+    );
+  }
+
   const subCat = subCategory != null ? String(subCategory).trim() : '';
   if (subCat && subCat !== 'all') {
     list = list.filter((v) => String(v.subCategory ?? '') === subCat);
@@ -1507,7 +1532,7 @@ app.get('/videos', auth, (req, res) => {
   if (ts && ts !== 'all') {
     list = list.filter((v) => {
       const x = v.targetSpecies ?? v.applicableSpecies;
-      if (x == null || x === '') return true;
+      if (x == null || x === '') return false;
       if (Array.isArray(x)) return x.includes(ts) || x.includes('all');
       return String(x) === ts || String(x) === 'all';
     });
@@ -1573,12 +1598,32 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
   if (locErr) return res.status(400).json({ message: locErr });
   const normalizedLocation = normalizeVideoLocation(req.body);
 
+  const bodyType = String(req.body?.type || '').trim();
+  const heritageTypes = ['horse', 'camel', 'falcon', 'sheep'];
+  if (heritageTypes.includes(bodyType)) {
+    const sp = String(req.body?.species || bodyType).trim();
+    if (sp !== bodyType) {
+      return res.status(400).json({
+        message: `نوع الفيديو (${bodyType}) لا يطابق التصنيف (${sp})`,
+      });
+    }
+  }
+  if (bodyType === 'service') {
+    const st = String(
+      req.body?.serviceType || req.body?.serviceCategory || '',
+    ).trim();
+    if (!st) {
+      return res.status(400).json({ message: 'نوع الخدمة مطلوب لفيديو الخدمات' });
+    }
+  }
+
   const videoId = req.body.cloudflareVideoId || id();
   const video = {
     id: videoId,
     ...req.body,
     location: normalizedLocation,
     city: normalizedLocation?.city || req.body.city || '',
+    ...(heritageTypes.includes(bodyType) ? { species: bodyType } : {}),
     userId: req.body.userId || req.authUserId,
     createdAt: new Date().toISOString(),
     likes: req.body.likes ?? 0,
