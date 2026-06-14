@@ -5,6 +5,27 @@
  * توثيق API: http://localhost:4000/api-docs
  */
 
+const SHEEP_FEATURES_ENABLED = false;
+const SHEEP_PAUSED_MESSAGE =
+  'خدمات الأغنام متوقفة مؤقتاً في المرحلة الأولى. نركز حالياً على الخيل والإبل والصقور.';
+
+function isSheepSpecies(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase() === 'sheep';
+}
+
+function rejectSheepPaused(res) {
+  if (SHEEP_FEATURES_ENABLED) return false;
+  res.status(403).json({ message: SHEEP_PAUSED_MESSAGE });
+  return true;
+}
+
+function stripSheepListings(list) {
+  if (SHEEP_FEATURES_ENABLED) return list;
+  return list.filter((item) => !isSheepSpecies(item.species || item.type));
+}
+
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -731,6 +752,7 @@ app.get('/horses', (req, res) => {
   if (sortBy === 'price_asc') list.sort((a, b) => Number(a.price) - Number(b.price));
   if (sortBy === 'price_desc') list.sort((a, b) => Number(b.price) - Number(a.price));
   if (limit) list = list.slice(0, Number(limit));
+  list = stripSheepListings(list);
   list = filterListingsForViewer(list, viewerFromToken(req));
   res.json(list);
 });
@@ -749,6 +771,7 @@ app.post('/horses', auth, requireSessionUser, (req, res) => {
     'horse';
   const err = roles.assertListingCreate(req.authUser, species);
   if (err) return res.status(403).json({ message: err });
+  if (isSheepSpecies(species) && rejectSheepPaused(res)) return;
   if (species === 'sheep') {
     const sheepErr = validateSheepListing(req.body);
     if (sheepErr) return res.status(400).json({ message: sheepErr });
@@ -772,6 +795,7 @@ app.patch('/horses/:id', auth, (req, res) => {
   if (!existing) return res.status(404).json({ message: 'الخيل غير موجود' });
   const mergedSpecies =
     req.body?.species || req.body?.listingSpecies || existing.species || 'horse';
+  if (isSheepSpecies(mergedSpecies) && rejectSheepPaused(res)) return;
   if (mergedSpecies === 'sheep') {
     const sheepErr = validateSheepListing({ ...existing, ...req.body });
     if (sheepErr) return res.status(400).json({ message: sheepErr });
@@ -1412,6 +1436,19 @@ app.get('/videos', auth, (req, res) => {
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
 
+  if (!SHEEP_FEATURES_ENABLED) {
+    list = list.filter((v) => {
+      if (v.type === 'sheep') return false;
+      const ts = String(v.targetSpecies || '').trim().toLowerCase();
+      if (ts === 'sheep') return false;
+      if (Array.isArray(v.applicableSpecies)) {
+        return !v.applicableSpecies.includes('sheep');
+      }
+      return true;
+    });
+    if (type === 'sheep') list = [];
+  }
+
   const heritageTypes = ['horse', 'camel', 'falcon', 'sheep'];
   if (type && heritageTypes.includes(String(type))) {
     list = list.filter((v) => {
@@ -1599,6 +1636,7 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
   const normalizedLocation = normalizeVideoLocation(req.body);
 
   const bodyType = String(req.body?.type || '').trim();
+  if (isSheepSpecies(bodyType) && rejectSheepPaused(res)) return;
   const heritageTypes = ['horse', 'camel', 'falcon', 'sheep'];
   if (heritageTypes.includes(bodyType)) {
     const sp = String(req.body?.species || bodyType).trim();
@@ -1615,6 +1653,8 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
     if (!st) {
       return res.status(400).json({ message: 'نوع الخدمة مطلوب لفيديو الخدمات' });
     }
+    const ts = String(req.body?.targetSpecies || '').trim().toLowerCase();
+    if (isSheepSpecies(ts) && rejectSheepPaused(res)) return;
   }
 
   const videoId = req.body.cloudflareVideoId || id();
