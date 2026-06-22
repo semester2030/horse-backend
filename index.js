@@ -69,6 +69,26 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 const LEGACY_DATA_FILE = path.join(__dirname, 'data', 'store.json');
+const PERSISTENT_DATA_DIR = '/var/data';
+
+function isPersistentProductionStorage() {
+  return path.resolve(DATA_DIR) === path.resolve(PERSISTENT_DATA_DIR);
+}
+
+function storagePersistenceStatus() {
+  const inProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const persistent = isPersistentProductionStorage();
+  return {
+    dataDir: DATA_DIR,
+    dataFile: DATA_FILE,
+    dataFileExists: fs.existsSync(DATA_FILE),
+    persistent,
+    inProduction,
+    warning: inProduction && !persistent
+      ? 'البيانات تُحفظ في مسار مؤقت — كل نشر جديد يمسح المستخدمين والفيديوهات. فعّل DATA_DIR=/var/data وقرصاً دائماً على Render (خطة Starter).'
+      : null,
+  };
+}
 const VERIFICATION_DIR = path.join(DATA_DIR, 'verification');
 const ADMIN_JWT_SECRET =
   process.env.ADMIN_JWT_SECRET || process.env.ADMIN_SECRET || 'nomas-admin-jwt-change-me';
@@ -130,79 +150,86 @@ function shouldExposeOtpCode() {
 }
 const SETUP_TTL_MS = 30 * 60 * 1000;
 
+function applyStoreSnapshot(data, sourceLabel) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('ملف البيانات غير صالح');
+  }
+  if (data.users && typeof data.users === 'object') {
+    store.users = new Map(Object.entries(data.users));
+  }
+  if (data.horses && typeof data.horses === 'object') {
+    store.horses = new Map(Object.entries(data.horses));
+  }
+  if (data.favorites && typeof data.favorites === 'object') {
+    store.favorites = new Map(Object.entries(data.favorites));
+  }
+  if (data.bookings && typeof data.bookings === 'object') {
+    store.bookings = new Map(Object.entries(data.bookings));
+  }
+  if (data.services && typeof data.services === 'object') {
+    store.services = new Map(Object.entries(data.services));
+  }
+  if (data.catalogItems && typeof data.catalogItems === 'object') {
+    store.catalogItems = new Map(Object.entries(data.catalogItems));
+  }
+  if (data.carts && typeof data.carts === 'object') {
+    store.carts = new Map(Object.entries(data.carts));
+  }
+  if (data.orders && typeof data.orders === 'object') {
+    store.orders = new Map(Object.entries(data.orders));
+  }
+  if (data.videos && typeof data.videos === 'object') {
+    store.videos = new Map(Object.entries(data.videos));
+  }
+  if (data.videoComments && typeof data.videoComments === 'object') {
+    store.videoComments = data.videoComments;
+  }
+  if (Array.isArray(data.messages)) {
+    store.messages = data.messages;
+  } else {
+    store.messages = [];
+  }
+  if (Array.isArray(data.contentReports)) {
+    store.contentReports = data.contentReports;
+  } else {
+    store.contentReports = [];
+  }
+  if (data.accessTokens && typeof data.accessTokens === 'object') {
+    store.accessTokens = new Map(
+      Object.entries(data.accessTokens).map(([k, v]) => [
+        k,
+        typeof v === 'object' && v && v.userId ? { userId: String(v.userId) } : { userId: '' },
+      ]),
+    );
+  } else {
+    store.accessTokens = new Map();
+  }
+  if (data.adminUsers && typeof data.adminUsers === 'object') {
+    store.adminUsers = new Map(Object.entries(data.adminUsers));
+  } else {
+    store.adminUsers = new Map();
+  }
+  if (Array.isArray(data.auditEvents)) {
+    store.auditEvents = data.auditEvents;
+  } else {
+    store.auditEvents = [];
+  }
+  if (data.apiMetrics && typeof data.apiMetrics === 'object') {
+    store.apiMetrics = data.apiMetrics;
+  }
+  ensureModerationStore(store);
+  const catalogN = store.catalogItems.size;
+  const videoN = store.videos.size;
+  console.log(
+    `[store] محمّل من ${sourceLabel}: ${store.users.size} مستخدم، ${store.horses.size} خيل، ${catalogN} كتالوج، ${videoN} فيديو`,
+  );
+}
+
 function loadStore() {
   try {
     if (!fs.existsSync(DATA_FILE)) return;
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    if (data.users && typeof data.users === 'object') {
-      store.users = new Map(Object.entries(data.users));
-    }
-    if (data.horses && typeof data.horses === 'object') {
-      store.horses = new Map(Object.entries(data.horses));
-    }
-    if (data.favorites && typeof data.favorites === 'object') {
-      store.favorites = new Map(Object.entries(data.favorites));
-    }
-    if (data.bookings && typeof data.bookings === 'object') {
-      store.bookings = new Map(Object.entries(data.bookings));
-    }
-    if (data.services && typeof data.services === 'object') {
-      store.services = new Map(Object.entries(data.services));
-    }
-    if (data.catalogItems && typeof data.catalogItems === 'object') {
-      store.catalogItems = new Map(Object.entries(data.catalogItems));
-    }
-    if (data.carts && typeof data.carts === 'object') {
-      store.carts = new Map(Object.entries(data.carts));
-    }
-    if (data.orders && typeof data.orders === 'object') {
-      store.orders = new Map(Object.entries(data.orders));
-    }
-    if (data.videos && typeof data.videos === 'object') {
-      store.videos = new Map(Object.entries(data.videos));
-    }
-    if (data.videoComments && typeof data.videoComments === 'object') {
-      store.videoComments = data.videoComments;
-    }
-    if (Array.isArray(data.messages)) {
-      store.messages = data.messages;
-    } else {
-      store.messages = [];
-    }
-    if (Array.isArray(data.contentReports)) {
-      store.contentReports = data.contentReports;
-    } else {
-      store.contentReports = [];
-    }
-    if (data.accessTokens && typeof data.accessTokens === 'object') {
-      store.accessTokens = new Map(
-        Object.entries(data.accessTokens).map(([k, v]) => [
-          k,
-          typeof v === 'object' && v && v.userId ? { userId: String(v.userId) } : { userId: '' },
-        ]),
-      );
-    } else {
-      store.accessTokens = new Map();
-    }
-    if (data.adminUsers && typeof data.adminUsers === 'object') {
-      store.adminUsers = new Map(Object.entries(data.adminUsers));
-    } else {
-      store.adminUsers = new Map();
-    }
-    if (Array.isArray(data.auditEvents)) {
-      store.auditEvents = data.auditEvents;
-    } else {
-      store.auditEvents = [];
-    }
-    if (data.apiMetrics && typeof data.apiMetrics === 'object') {
-      store.apiMetrics = data.apiMetrics;
-    }
-    const catalogN = store.catalogItems.size;
-    const videoN = store.videos.size;
-    console.log(
-      `[store] محمّل من ${DATA_FILE}: ${store.users.size} مستخدم، ${store.horses.size} خيل، ${catalogN} كتالوج، ${videoN} فيديو`,
-    );
+    applyStoreSnapshot(JSON.parse(raw), DATA_FILE);
   } catch (e) {
     console.log('لم يتم تحميل بيانات سابقة:', e.message);
   }
@@ -241,6 +268,10 @@ if (!fs.existsSync(VERIFICATION_DIR)) {
   fs.mkdirSync(VERIFICATION_DIR, { recursive: true });
 }
 loadStore();
+const persistence = storagePersistenceStatus();
+if (persistence.warning) {
+  console.error(`[store] تحذير: ${persistence.warning}`);
+}
 
 // توليد معرف فريد
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
@@ -374,12 +405,13 @@ app.get('/media/public/stream-customer-hash', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
+  const persistenceInfo = storagePersistenceStatus();
   res.json({
     ok: true,
     storage: {
-      dataDir: DATA_DIR,
-      dataFileExists: fs.existsSync(DATA_FILE),
+      ...persistenceInfo,
       users: store.users.size,
+      horses: store.horses.size,
       catalogItems: store.catalogItems.size,
       videos: store.videos.size,
     },
@@ -757,7 +789,7 @@ app.get('/horses', (req, res) => {
   res.json(list);
 });
 
-app.get('/horses/:id', auth, (req, res) => {
+app.get('/horses/:id', (req, res) => {
   const h = store.horses.get(req.params.id);
   if (!h) return res.status(404).json({ message: 'الخيل غير موجود' });
   res.json(h);
@@ -888,7 +920,8 @@ app.patch('/bookings/:id', auth, (req, res) => {
 });
 
 // ========== Services ==========
-app.get('/services', auth, (req, res) => {
+// GET /services بدون auth — تصفح الزائر قبل التسجيل
+app.get('/services', (req, res) => {
   const { type, providerId, species } = req.query;
   let list = [...store.services.values()];
   if (type) list = list.filter(s => s.type === type);
@@ -1431,7 +1464,8 @@ function enrichVideoDistance(video, clientLat, clientLng) {
   return out;
 }
 
-app.get('/videos', auth, (req, res) => {
+// GET /videos بدون auth — تصفح الزائر قبل التسجيل
+app.get('/videos', (req, res) => {
   const { type, q, sort, serviceCategory, targetSpecies, subCategory } = req.query;
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
@@ -1959,11 +1993,40 @@ app.get('/admin/data', requireAdmin, (req, res) => {
     favorites: Object.fromEntries(store.favorites),
     bookings: Object.fromEntries(store.bookings),
     services: Object.fromEntries(store.services),
+    catalogItems: Object.fromEntries(store.catalogItems),
+    carts: Object.fromEntries(store.carts),
+    orders: Object.fromEntries(store.orders),
     videos: Object.fromEntries(store.videos),
     videoComments: store.videoComments,
     messages: store.messages || [],
+    contentReports: store.contentReports || [],
+    accessTokens: Object.fromEntries(store.accessTokens),
+    adminUsers: Object.fromEntries(store.adminUsers),
+    auditEvents: store.auditEvents || [],
+    apiMetrics: store.apiMetrics,
   };
   res.json(data);
+});
+
+/** استعادة store.json كاملاً — بعد تفعيل القرص الدائم على Render */
+app.post('/admin/restore-store', requireAdmin, (req, res) => {
+  try {
+    applyStoreSnapshot(req.body, 'admin/restore-store');
+    saveStore();
+    res.json({
+      ok: true,
+      message: 'تمت استعادة البيانات',
+      counts: {
+        users: store.users.size,
+        horses: store.horses.size,
+        videos: store.videos.size,
+        services: store.services.size,
+      },
+      storage: storagePersistenceStatus(),
+    });
+  } catch (e) {
+    res.status(400).json({ message: e.message || 'فشلت الاستعادة' });
+  }
 });
 
 // ========== إدارة: حذف وتعديل (صلاحيات مطلقة) ==========

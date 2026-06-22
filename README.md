@@ -75,7 +75,21 @@ npm start
 
 1. في [Render Dashboard](https://dashboard.render.com) → **horse-backend** → تأكد أن الخطة **Starter** (أو أعلى).
 2. إن كان الخدمة على **Free**، غيّرها إلى **Starter** ثم أعد النشر من Blueprint أو Sync.
-3. تحقق: `GET https://horse-backend-i68h.onrender.com/health` — يجب أن يظهر `dataDir: "/var/data"` و `dataFileExists: true` بعد أول حفظ.
+3. تحقق: `GET https://horse-backend-i68h.onrender.com/health` — يجب أن يظهر:
+   - `"dataDir": "/var/data"`
+   - `"persistent": true`
+   - `"warning": null`
+
+إذا ظهر `dataDir: "/opt/render/project/src/data"` و `"persistent": false` فالبيانات **تُمسح مع كل نشر** — هذا سبب اختفاء الحساب والفيديوهات.
+
+### استعادة نسخة محلية
+
+بعد تفعيل القرص الدائم:
+
+```bash
+cd backend
+ADMIN_SECRET=كلمة_سر_الإدارة ./scripts/restore-production-store.sh data/store.json
+```
 
 **تحذير:** البيانات التي فُقدت قبل تفعيل القرص لا تُستعاد تلقائياً — أعد إدخالها أو استورد نسخة من `data/store.json` المحلي إن وُجدت.
 
