@@ -95,6 +95,50 @@ ADMIN_SECRET=كلمة_سر_الإدارة ./scripts/restore-production-store.sh 
 
 يمكن لاحقاً ربط PostgreSQL إذا كبر حجم البيانات.
 
+## Amazon SNS — رمز التحقق عبر SMS (App Store)
+
+عند ضبط `AWS_ACCESS_KEY_ID` و `AWS_SECRET_ACCESS_KEY` على Render:
+
+- يُرسل الرمز **برسالة نصية** إلى الجوال
+- **لا يُعرض** `devCode` في التطبيق (حتى في Release)
+- تحقق: `GET /health` → `"sms": { "configured": true }`
+
+### إعداد AWS (مرة واحدة)
+
+1. **IAM** → Users → Create user (مثلاً `nomas-sns`)
+2. Attach policy مخصصة:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["sns:Publish"],
+    "Resource": "*"
+  }]
+}
+```
+
+3. أنشئ **Access key** واحفظ `Access key ID` + `Secret`
+4. **SNS** → Text messaging (SMS) → **Account settings**:
+   - اطلب **Production access** (رفع حد Sandbox) لإرسال لأرقام حقيقية
+   - اضبط **Default SMS type** = Transactional
+5. على **Render** → Environment:
+
+| المتغير | القيمة |
+|---------|--------|
+| `AWS_ACCESS_KEY_ID` | من IAM |
+| `AWS_SECRET_ACCESS_KEY` | من IAM |
+| `AWS_REGION` | `eu-north-1` (أو منطقتك) |
+| `AWS_SNS_SMS_TYPE` | `Transactional` |
+| `OTP_EXPOSE_CODE` | `false` |
+
+6. أعد النشر ثم جرّب تسجيل الدخول من التطبيق.
+
+**التكلفة التقريبية:** ~0.05–0.08 USD لكل رسالة إلى السعودية (يُخصم من رصيد AWS 100$).
+
+**التطوير المحلي:** بدون AWS، اترك `OTP_EXPOSE_CODE=true` — الرمز يظهر في Debug فقط.
+
 ## Cloudflare (رفع فيديو / صور من التطبيق)
 
 التوكن **لا يُخزَّن في تطبيق Flutter** (متطلبات أمان ومتاجر التطبيقات).  

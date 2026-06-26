@@ -143,8 +143,11 @@ const otpCodes = new Map();
 const setupTokens = new Map();
 const OTP_TTL_MS = 5 * 60 * 1000;
 
-/** إظهار الرمز في الاستجابة والتطبيق — أوقفه لاحقاً بـ OTP_EXPOSE_CODE=false بعد تفعيل SMS */
+const snsOtp = require('./sms/sns_otp');
+
+/** إظهار الرمز على الشاشة — للتطوير فقط. يُعطَّل تلقائياً عند تفعيل AWS SNS. */
 function shouldExposeOtpCode() {
+  if (snsOtp.isConfigured()) return false;
   const flag = String(process.env.OTP_EXPOSE_CODE || 'true').toLowerCase();
   return flag !== 'false' && flag !== '0' && flag !== 'no';
 }
@@ -415,6 +418,7 @@ app.get('/health', (req, res) => {
       catalogItems: store.catalogItems.size,
       videos: store.videos.size,
     },
+    sms: snsOtp.status(),
   });
 });
 
@@ -534,7 +538,7 @@ app.get('/auth/countries', (_req, res) => {
   });
 });
 
-app.post('/auth/otp/send', (req, res) => {
+app.post('/auth/otp/send', async (req, res) => {
   const countryCode = String(req.body?.countryCode || countries.DEFAULT_COUNTRY).toUpperCase();
   const phone = roles.normalizePhone(req.body?.phone, countryCode);
   if (!phone) {
@@ -545,13 +549,41 @@ app.post('/auth/otp/send', (req, res) => {
   }
   const code = otpSixDigits();
   otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
-  const payload = { ok: true, message: 'تم إرسال رمز التحقق' };
-  if (shouldExposeOtpCode()) {
-    payload.devCode = code;
-    payload.showDevCodeOnScreen = true;
-    console.log(`[OTP] ${phone} => ${code}`);
+
+  try {
+    let smsSent = false;
+    if (snsOtp.isConfigured()) {
+      await snsOtp.sendOtpSms(phone, code);
+      smsSent = true;
+      console.log(`[OTP/SNS] أُرسل إلى ${phone}`);
+    } else if (!shouldExposeOtpCode()) {
+      return res.status(503).json({
+        message:
+          'خدمة الرسائل غير مفعّلة. أضف AWS SNS على الخادم أو OTP_EXPOSE_CODE=true للتطوير المحلي.',
+      });
+    }
+
+    const payload = {
+      ok: true,
+      smsSent,
+      message: smsSent
+        ? 'تم إرسال رمز التحقق برسالة نصية إلى جوالك'
+        : 'تم إرسال رمز التحقق',
+    };
+    if (shouldExposeOtpCode()) {
+      payload.devCode = code;
+      payload.showDevCodeOnScreen = true;
+      console.log(`[OTP/DEV] ${phone} => ${code}`);
+    }
+    res.json(payload);
+  } catch (e) {
+    console.error('[OTP/SNS] فشل الإرسال:', e.message || e);
+    otpCodes.delete(phone);
+    res.status(503).json({
+      message:
+        'تعذّر إرسال الرسالة النصية. تحقق من إعدادات AWS SNS (الصلاحيات، حد الإرسال، رقم الجوال) وحاول لاحقاً.',
+    });
   }
-  res.json(payload);
 });
 
 app.post('/auth/otp/verify', (req, res) => {
