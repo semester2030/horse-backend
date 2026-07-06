@@ -16,12 +16,18 @@ function region() {
   return (process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'eu-north-1').trim();
 }
 
+function exposeDevCodeOnScreen() {
+  if (isConfigured()) return false;
+  const flag = String(process.env.OTP_EXPOSE_CODE || 'true').toLowerCase();
+  return flag !== 'false' && flag !== '0' && flag !== 'no';
+}
+
 function status() {
   return {
     configured: isConfigured(),
     region: region(),
     smsType: process.env.AWS_SNS_SMS_TYPE || 'Transactional',
-    exposeDevCode: !isConfigured(),
+    exposeDevCode: exposeDevCodeOnScreen(),
   };
 }
 
@@ -45,7 +51,8 @@ async function sendOtpSms(e164Phone, code) {
     },
   });
 
-  const message = `رمز التحقق في نوماس: ${code}\nصالح 5 دقائق.`;
+  // إنجليزي فقط — أوضح للمشغّلين السعوديين وأقل مشاكل ترميز من العربي.
+  const message = `Nomas verification code: ${code}. Valid 5 minutes.`;
 
   /** @type {import('@aws-sdk/client-sns').PublishCommandInput} */
   const input = {
@@ -68,7 +75,9 @@ async function sendOtpSms(e164Phone, code) {
   }
 
   const result = await client.send(new PublishCommand(input));
-  return result.MessageId || null;
+  const messageId = result.MessageId || null;
+  console.log(`[OTP/SNS] MessageId=${messageId} to=${e164Phone} region=${region()}`);
+  return messageId;
 }
 
 module.exports = {

@@ -95,15 +95,29 @@ ADMIN_SECRET=كلمة_سر_الإدارة ./scripts/restore-production-store.sh 
 
 يمكن لاحقاً ربط PostgreSQL إذا كبر حجم البيانات.
 
-## Amazon SNS — رمز التحقق عبر SMS (App Store)
+## Taqnyat (تقنيات) — رمز التحقق SMS للسعودية (موصى به)
 
-عند ضبط `AWS_ACCESS_KEY_ID` و `AWS_SECRET_ACCESS_KEY` على Render:
+**الخيار الافتراضي** لـ OTP في السعودية (+966).
 
-- يُرسل الرمز **برسالة نصية** إلى الجوال
-- **لا يُعرض** `devCode` في التطبيق (حتى في Release)
-- تحقق: `GET /health` → `"sms": { "configured": true }`
+1. سجّل في [portal.taqnyat.sa](https://portal.taqnyat.sa)
+2. **المطورين → التطبيقات** → أنشئ تطبيقاً (SMS) → انسخ **Bearer Token**
+3. **أكمل الوثائق** + سجّل **اسم المرسل** (مثل `NOMAS`) في إدارة SMS
+4. على **Render** → Environment:
 
-### إعداد AWS (مرة واحدة)
+| المتغير | القيمة |
+|---------|--------|
+| `SMS_PROVIDER` | `taqnyat` |
+| `TAQNYAT_BEARER_TOKEN` | من portal |
+| `TAQNYAT_SENDER` | `NOMAS` (اسم معتمد) |
+| `OTP_EXPOSE_CODE` | `false` |
+
+5. تحقق: `GET /health` → `"sms": { "configured": true, "provider": "taqnyat", "sender": "NOMAS" }`
+
+**التطوير المحلي:** بدون Taqnyat، اترك `OTP_EXPOSE_CODE=true` — الرمز يظهر في Debug فقط.
+
+## Amazon SNS — بديل (احتياطي)
+
+عند `SMS_PROVIDER=sns` أو عدم وجود Taqnyat:
 
 1. **IAM** → Users → Create user (مثلاً `nomas-sns`)
 2. Attach policy مخصصة:

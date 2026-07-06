@@ -143,13 +143,11 @@ const otpCodes = new Map();
 const setupTokens = new Map();
 const OTP_TTL_MS = 5 * 60 * 1000;
 
-const snsOtp = require('./sms/sns_otp');
+const smsOtp = require('./sms');
 
-/** إظهار الرمز على الشاشة — للتطوير فقط. يُعطَّل تلقائياً عند تفعيل AWS SNS. */
+/** إظهار الرمز على الشاشة — للتطوير فقط. يُعطَّل تلقائياً عند تفعيل SMS. */
 function shouldExposeOtpCode() {
-  if (snsOtp.isConfigured()) return false;
-  const flag = String(process.env.OTP_EXPOSE_CODE || 'true').toLowerCase();
-  return flag !== 'false' && flag !== '0' && flag !== 'no';
+  return smsOtp.exposeDevCodeOnScreen();
 }
 const SETUP_TTL_MS = 30 * 60 * 1000;
 
@@ -418,7 +416,7 @@ app.get('/health', (req, res) => {
       catalogItems: store.catalogItems.size,
       videos: store.videos.size,
     },
-    sms: snsOtp.status(),
+    sms: smsOtp.status(),
   });
 });
 
@@ -552,14 +550,16 @@ app.post('/auth/otp/send', async (req, res) => {
 
   try {
     let smsSent = false;
-    if (snsOtp.isConfigured()) {
-      await snsOtp.sendOtpSms(phone, code);
+    if (smsOtp.isConfigured()) {
+      const messageId = await smsOtp.sendOtpSms(phone, code);
       smsSent = true;
-      console.log(`[OTP/SNS] أُرسل إلى ${phone}`);
+      console.log(`[OTP/SMS] طلب إرسال إلى ${phone} MessageId=${messageId || '?'}`);
     } else if (!shouldExposeOtpCode()) {
+      const smsStatus = smsOtp.status();
       return res.status(503).json({
         message:
-          'خدمة الرسائل غير مفعّلة. أضف AWS SNS على الخادم أو OTP_EXPOSE_CODE=true للتطوير المحلي.',
+          smsStatus.hint ||
+          'خدمة الرسائل غير مفعّلة. أضف Taqnyat (TAQNYAT_BEARER_TOKEN + TAQNYAT_SENDER) على Render.',
       });
     }
 
@@ -577,11 +577,10 @@ app.post('/auth/otp/send', async (req, res) => {
     }
     res.json(payload);
   } catch (e) {
-    console.error('[OTP/SNS] فشل الإرسال:', e.message || e);
+    console.error('[OTP/SMS] فشل الإرسال:', e.message || e);
     otpCodes.delete(phone);
     res.status(503).json({
-      message:
-        'تعذّر إرسال الرسالة النصية. تحقق من إعدادات AWS SNS (الصلاحيات، حد الإرسال، رقم الجوال) وحاول لاحقاً.',
+      message: e.message || 'تعذّر إرسال الرسالة النصية. تحقق من Taqnyat (الوثائق، اسم المرسل NOMAS، الرصيد).',
     });
   }
 });
@@ -2286,6 +2285,12 @@ app.listen(PORT, HOST, () => {
   console.log(`باك اند العاديات يعمل على http://localhost:${PORT}`);
   console.log(`للجهاز الفعلي على نفس الواي فاي: http://horse-backend.local:${PORT} (mDNS)`);
   console.log(`توثيق API (Swagger): http://localhost:${PORT}/api-docs`);
+  const sms = smsOtp.status();
+  if (sms.configured) {
+    console.log(`[SMS] مفعّل عبر ${sms.provider}${sms.sender ? ` sender=${sms.sender}` : ''}`);
+  } else {
+    console.warn('[SMS] غير مفعّل —', sms.hint || 'أضف Taqnyat على Render');
+  }
   // إعلان mDNS حتى يصل الآيفون عبر horse-backend.local بدون إدخال IP
   try {
     const bonjour = require('bonjour')();
