@@ -144,6 +144,7 @@ const setupTokens = new Map();
 const OTP_TTL_MS = 5 * 60 * 1000;
 
 const smsOtp = require('./sms');
+const otpDev = require('./otp_dev');
 
 /** إظهار الرمز على الشاشة — للتطوير فقط. يُعطَّل تلقائياً عند تفعيل SMS. */
 function shouldExposeOtpCode() {
@@ -417,6 +418,7 @@ app.get('/health', (req, res) => {
       videos: store.videos.size,
     },
     sms: smsOtp.status(),
+    otpDev: otpDev.status(),
   });
 });
 
@@ -545,8 +547,24 @@ app.post('/auth/otp/send', async (req, res) => {
       message: `رقم الجوال غير صالح (${c.placeholder})`,
     });
   }
-  const code = otpSixDigits();
+  const devBypassCode = otpDev.codeForPhone(phone);
+  const code = devBypassCode || otpSixDigits();
   otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
+
+  if (devBypassCode) {
+    console.log(`[OTP/DEV] ${phone} => رمز مطوّر (بدون SMS)`);
+    const payload = {
+      ok: true,
+      smsSent: false,
+      devBypass: true,
+      message: 'تم تجهيز رمز التحقق — أدخل الرمز المخصص لحساب المطوّر',
+    };
+    if (otpDev.shouldExposeDevCodeInResponse()) {
+      payload.devCode = devBypassCode;
+      payload.showDevCodeOnScreen = true;
+    }
+    return res.json(payload);
+  }
 
   try {
     let smsSent = false;
