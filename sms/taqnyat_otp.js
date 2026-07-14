@@ -50,6 +50,9 @@ function mapTaqnyatError(status, data, raw) {
     return 'اسم المرسل غير مفعّل — فعّل NOMAS في portal.taqnyat.sa (أسماء المرسل)';
   }
   if (status === 403 || text.includes('forbidden') || text.includes('balance')) {
+    if (text.includes('ip') && text.includes('not authorized')) {
+      return 'عنوان IP السيرفر غير مسموح في Taqnyat — من portal: الإعدادات الأمنية → أضف IP أو عطّل تقييد IP';
+    }
     return 'حساب Taqnyat غير مفعّل — أكمل الوثائق أو اشحن الرصيد في portal.taqnyat.sa';
   }
   if (data?.message) return data.message;

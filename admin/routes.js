@@ -461,6 +461,37 @@ function createAdminRouter(ctx) {
     res.json(h);
   });
 
+  const canGrantBadges = (req) => {
+    const perms = permissionsForRole(req.adminUser.role);
+    return (
+      perms.includes('content:moderate') ||
+      perms.includes('users:verify') ||
+      req.adminUser.role === ADMIN_ROLES.super_admin
+    );
+  };
+
+  router.patch('/listings/:id/badges', requireAdminAuth, (req, res) => {
+    if (!canGrantBadges(req)) {
+      return res.status(403).json({ message: 'لا صلاحية لمنح الشارات' });
+    }
+    const heritageTB = require('../heritage_tags_badges');
+    const h = ctx.store.horses.get(req.params.id);
+    if (!h) return res.status(404).json({ message: 'الإعلان غير موجود' });
+    h.badges = heritageTB.sanitizeBadges(req.body?.badges);
+    h.updatedAt = new Date().toISOString();
+    ctx.store.horses.set(h.id, h);
+    ctx.saveStore();
+    logAudit(ctx, {
+      actorId: req.adminUserId,
+      actorName: req.adminUser.name,
+      action: 'listing.badges',
+      entityType: 'listing',
+      entityId: h.id,
+      meta: { badges: h.badges },
+    });
+    res.json(h);
+  });
+
   router.delete('/listings/:id', requireAdminAuth, requirePerm('content:moderate'), (req, res) => {
     ctx.store.horses.delete(req.params.id);
     ctx.saveStore();
@@ -515,6 +546,33 @@ function createAdminRouter(ctx) {
       action: 'video.moderate',
       entityType: 'video',
       entityId: v.id,
+    });
+    res.json(v);
+  });
+
+  router.patch('/videos/:id/badges', requireAdminAuth, (req, res) => {
+    const perms = permissionsForRole(req.adminUser.role);
+    if (
+      !perms.includes('videos:moderate') &&
+      !perms.includes('users:verify') &&
+      req.adminUser.role !== ADMIN_ROLES.super_admin
+    ) {
+      return res.status(403).json({ message: 'لا صلاحية لمنح الشارات' });
+    }
+    const heritageTB = require('../heritage_tags_badges');
+    const v = ctx.store.videos.get(req.params.id);
+    if (!v) return res.status(404).json({ message: 'الفيديو غير موجود' });
+    v.badges = heritageTB.sanitizeBadges(req.body?.badges);
+    v.updatedAt = new Date().toISOString();
+    ctx.store.videos.set(v.id, v);
+    ctx.saveStore();
+    logAudit(ctx, {
+      actorId: req.adminUserId,
+      actorName: req.adminUser.name,
+      action: 'video.badges',
+      entityType: 'video',
+      entityId: v.id,
+      meta: { badges: v.badges },
     });
     res.json(v);
   });
@@ -786,6 +844,76 @@ function createAdminRouter(ctx) {
       entityId: report.id,
     });
     res.json(report);
+  });
+
+  // ——— Experts ———
+  router.get('/experts', requireAdminAuth, requirePerm('users:read'), (req, res) => {
+    let list = [...(ctx.store.experts?.values?.() || [])];
+    if (req.query.status) {
+      list = list.filter((e) => e.status === req.query.status);
+    }
+    list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    // للإدارة: إظهار المستندات الخاصة
+    res.json(paginate(list, req.query.page, req.query.limit));
+  });
+
+  router.patch('/experts/:id', requireAdminAuth, requirePerm('users:verify'), (req, res) => {
+    if (!ctx.store.experts) ctx.store.experts = new Map();
+    const e = ctx.store.experts.get(req.params.id);
+    if (!e) return res.status(404).json({ message: 'الطلب غير موجود' });
+
+    const status = String(req.body?.status || '').trim();
+    if (status) {
+      if (!['approved', 'rejected', 'suspended', 'pending'].includes(status)) {
+        return res.status(400).json({ message: 'حالة غير صالحة' });
+      }
+      e.status = status;
+      e.updatedAt = new Date().toISOString();
+      if (status === 'approved') {
+        e.approvedAt = new Date().toISOString();
+        // مباشرة بعد الموافقة الإدارية → موثوق
+        e.verified = true;
+        e.trustBadge = 'verified';
+        if (e.acceptingRequests == null) e.acceptingRequests = true;
+      } else {
+        e.verified = false;
+        e.trustBadge = null;
+      }
+    }
+
+    if (req.body.adminNote != null) {
+      e.adminNote = String(req.body.adminNote).slice(0, 500);
+    }
+
+    // تقييم الإدارة منفصل عن تقييم العملاء (1–5)
+    if (req.body.adminRating != null && req.body.adminRating !== '') {
+      const ar = Number(req.body.adminRating);
+      if (!Number.isFinite(ar) || ar < 1 || ar > 5) {
+        return res.status(400).json({ message: 'تقييم الإدارة من 1 إلى 5' });
+      }
+      e.adminRating = Math.round(ar);
+      e.adminRatingNote = String(req.body.adminRatingNote || '').slice(0, 300);
+      e.adminRatedAt = new Date().toISOString();
+      e.adminRatedBy = req.adminUserId;
+    }
+
+    e.updatedAt = new Date().toISOString();
+    ctx.store.experts.set(e.id, e);
+    ctx.saveStore();
+    logAudit(ctx, {
+      actorId: req.adminUserId,
+      actorName: req.adminUser.name,
+      action: status ? 'expert.' + status : 'expert.update',
+      entityType: 'expert',
+      entityId: e.id,
+    });
+    res.json(e);
+  });
+
+  router.get('/expert-requests', requireAdminAuth, requirePerm('content:read'), (req, res) => {
+    let list = [...(ctx.store.expertRequests?.values?.() || [])];
+    list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    res.json(paginate(list, req.query.page, req.query.limit));
   });
 
   return router;

@@ -94,6 +94,8 @@ const ADMIN_JWT_SECRET =
   process.env.ADMIN_JWT_SECRET || process.env.ADMIN_SECRET || 'nomas-admin-jwt-change-me';
 const { createAdminRouter, registerAppVerificationRoutes } = require('./admin/routes');
 const { seedSuperAdmin } = require('./admin/auth');
+const heritageTB = require('./heritage_tags_badges');
+const { createExpertsApi } = require('./experts');
 
 function ensureDataMigrated() {
   if (fs.existsSync(DATA_FILE)) return;
@@ -136,6 +138,12 @@ const store = {
   auditEvents: [],
   /** مقاييس API */
   apiMetrics: { routes: {}, recent: [] },
+  /** خبراء معتمدون */
+  experts: new Map(),
+  /** طلبات رأي خبير */
+  expertRequests: new Map(),
+  /** تقييمات الخبراء — مفتاح: ratingId */
+  expertRatings: new Map(),
 };
 
 /** رموز OTP وإعداد الحساب (ذاكرة — تُعاد إرسالها عند الحاجة) */
@@ -219,6 +227,21 @@ function applyStoreSnapshot(data, sourceLabel) {
   if (data.apiMetrics && typeof data.apiMetrics === 'object') {
     store.apiMetrics = data.apiMetrics;
   }
+  if (data.experts && typeof data.experts === 'object') {
+    store.experts = new Map(Object.entries(data.experts));
+  } else {
+    store.experts = new Map();
+  }
+  if (data.expertRequests && typeof data.expertRequests === 'object') {
+    store.expertRequests = new Map(Object.entries(data.expertRequests));
+  } else {
+    store.expertRequests = new Map();
+  }
+  if (data.expertRatings && typeof data.expertRatings === 'object') {
+    store.expertRatings = new Map(Object.entries(data.expertRatings));
+  } else {
+    store.expertRatings = new Map();
+  }
   ensureModerationStore(store);
   const catalogN = store.catalogItems.size;
   const videoN = store.videos.size;
@@ -257,6 +280,9 @@ function saveStore() {
       auditEvents: store.auditEvents,
       apiMetrics: store.apiMetrics,
       contentReports: store.contentReports,
+      experts: Object.fromEntries(store.experts),
+      expertRequests: Object.fromEntries(store.expertRequests),
+      expertRatings: Object.fromEntries(store.expertRatings),
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
@@ -456,6 +482,9 @@ app.use('/admin/v2', createAdminRouter(adminCtx));
 registerAppVerificationRoutes(app, adminCtx, auth, requireSessionUser);
 registerAccountLifecycleRoutes(app, { store, saveStore, auth, requireSessionUser });
 registerContentModerationRoutes(app, { store, saveStore, id, auth, requireSessionUser });
+
+const expertsApi = createExpertsApi({ store, saveStore, id, auth, requireSessionUser });
+expertsApi.registerAppRoutes(app);
 
 function viewerFromToken(req) {
   const entry = store.accessTokens.get(req.token);
@@ -812,7 +841,7 @@ app.patch('/users/:id', auth, requireSessionUser, (req, res) => {
 // ========== Horses ==========
 // GET /horses بدون auth حتى يعمل "دخول تجريبي" وعرض الخيل للجميع
 app.get('/horses', (req, res) => {
-  const { type, gender, city, minPrice, maxPrice, sortBy, limit, species, ownerId } = req.query;
+  const { type, gender, city, minPrice, maxPrice, sortBy, limit, species, ownerId, tag, badge } = req.query;
   let list = [...store.horses.values()];
   // فئة المنصة: horse | camel | falcon — البيانات القديمة تُعامل كـ horse
   if (species) {
@@ -827,6 +856,8 @@ app.get('/horses', (req, res) => {
   if (type) list = list.filter(h => h.type === type);
   if (gender) list = list.filter(h => h.gender === gender);
   if (city) list = list.filter(h => h.city === city);
+  if (tag) list = list.filter((h) => heritageTB.itemHasTag(h, tag));
+  if (badge) list = list.filter((h) => heritageTB.itemHasBadge(h, badge));
   const num = (v) => (v == null ? null : Number(v));
   if (num(minPrice) != null) list = list.filter(h => Number(h.price) >= num(minPrice));
   if (num(maxPrice) != null) list = list.filter(h => Number(h.price) <= num(maxPrice));
@@ -835,13 +866,13 @@ app.get('/horses', (req, res) => {
   if (limit) list = list.slice(0, Number(limit));
   list = stripSheepListings(list);
   list = filterListingsForViewer(list, viewerFromToken(req));
-  res.json(list);
+  res.json(list.map((h) => heritageTB.scrubItemTags(h)));
 });
 
 app.get('/horses/:id', (req, res) => {
   const h = store.horses.get(req.params.id);
   if (!h) return res.status(404).json({ message: 'الخيل غير موجود' });
-  res.json(h);
+  res.json(heritageTB.scrubItemTags(h));
 });
 
 app.post('/horses', auth, requireSessionUser, (req, res) => {
@@ -857,17 +888,21 @@ app.post('/horses', auth, requireSessionUser, (req, res) => {
     const sheepErr = validateSheepListing(req.body);
     if (sheepErr) return res.status(400).json({ message: sheepErr });
   }
+  const body = heritageTB.applyClientListingFields(req.body || {}, {});
   const horseId = id();
   const horse = {
     id: horseId,
-    ...req.body,
+    ...body,
+    tags: heritageTB.sanitizeTags(body.tags, species),
+    badges: [],
+    species,
     userId: req.authUserId,
     sellerId: req.authUserId,
     createdAt: new Date().toISOString(),
   };
   store.horses.set(horseId, horse);
   saveStore();
-  res.status(201).json(horse);
+  res.status(201).json(heritageTB.scrubItemTags(horse));
 });
 
 app.patch('/horses/:id', auth, (req, res) => {
@@ -881,13 +916,22 @@ app.patch('/horses/:id', auth, (req, res) => {
     const sheepErr = validateSheepListing({ ...existing, ...req.body });
     if (sheepErr) return res.status(400).json({ message: sheepErr });
   }
-  const updated = { ...existing, ...req.body, id, updatedAt: new Date().toISOString() };
+  const body = heritageTB.applyClientListingFields(req.body || {}, existing);
+  const updated = {
+    ...existing,
+    ...body,
+    id,
+    badges: Array.isArray(existing.badges) ? existing.badges : [],
+    updatedAt: new Date().toISOString(),
+  };
+  // دائماً: أعد تصفية الوسوم حسب النوع النهائي (يمنع تسرّب نوع سابق)
+  updated.tags = heritageTB.sanitizeTags(updated.tags, mergedSpecies);
   if (req.body.stats && typeof req.body.stats === 'object') {
     updated.stats = { ...(existing.stats || {}), ...req.body.stats };
   }
   store.horses.set(id, updated);
   saveStore();
-  res.json(updated);
+  res.json(heritageTB.scrubItemTags(updated));
 });
 
 // ========== Favorites ==========
@@ -1515,7 +1559,7 @@ function enrichVideoDistance(video, clientLat, clientLng) {
 
 // GET /videos بدون auth — تصفح الزائر قبل التسجيل
 app.get('/videos', (req, res) => {
-  const { type, q, sort, serviceCategory, targetSpecies, subCategory } = req.query;
+  const { type, q, sort, serviceCategory, targetSpecies, subCategory, tag, badge } = req.query;
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
 
@@ -1700,7 +1744,9 @@ app.get('/videos', (req, res) => {
   }
 
   list = filterVideosForViewer(list, viewerFromToken(req));
-  res.json(list);
+  if (tag) list = list.filter((v) => heritageTB.itemHasTag(v, tag));
+  if (badge) list = list.filter((v) => heritageTB.itemHasBadge(v, badge));
+  res.json(list.map((v) => heritageTB.scrubItemTags(v)));
 });
 
 app.post('/videos', auth, requireSessionUser, (req, res) => {
@@ -1740,13 +1786,19 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
     if (isSheepSpecies(ts) && rejectSheepPaused(res)) return;
   }
 
+  const body = heritageTB.applyClientListingFields(req.body || {}, {});
+  const tagSpecies = heritageTypes.includes(bodyType)
+    ? bodyType
+    : String(req.body?.targetSpecies || 'horse');
   const videoId = req.body.cloudflareVideoId || id();
   const video = {
     id: videoId,
-    ...req.body,
+    ...body,
     location: normalizedLocation,
     city: normalizedLocation?.city || req.body.city || '',
     ...(heritageTypes.includes(bodyType) ? { species: bodyType } : {}),
+    tags: heritageTB.sanitizeTags(body.tags, tagSpecies),
+    badges: [],
     userId: req.body.userId || req.authUserId,
     createdAt: new Date().toISOString(),
     likes: req.body.likes ?? 0,
@@ -1758,16 +1810,30 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
   };
   store.videos.set(videoId, video);
   saveStore();
-  res.status(201).json(video);
+  res.status(201).json(heritageTB.scrubItemTags(video));
 });
 
 app.patch('/videos/:id', auth, (req, res) => {
   const { id } = req.params;
   const existing = store.videos.get(id);
   if (!existing) return res.status(404).json({ message: 'الفيديو غير موجود' });
-  const updated = { ...existing, ...req.body, id };
+  const body = heritageTB.applyClientListingFields(req.body || {}, existing);
+  const tagSpecies =
+    req.body?.species ||
+    req.body?.targetSpecies ||
+    existing.species ||
+    existing.type ||
+    'horse';
+  const updated = {
+    ...existing,
+    ...body,
+    id,
+    badges: Array.isArray(existing.badges) ? existing.badges : [],
+  };
+  updated.tags = heritageTB.sanitizeTags(updated.tags, tagSpecies);
   store.videos.set(id, updated);
-  res.json(updated);
+  saveStore();
+  res.json(heritageTB.scrubItemTags(updated));
 });
 
 app.patch('/videos/:id/likes', auth, (req, res) => {
