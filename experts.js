@@ -47,7 +47,15 @@ function ratingStats(store, expertId) {
   };
 }
 
-function createExpertsApi({ store, saveStore, id, auth, requireSessionUser }) {
+function createExpertsApi({
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+  notifyEvent,
+  bookingOccupancy,
+}) {
   function listApproved(species) {
     ensureRatingsStore(store);
     let list = [...store.experts.values()].filter((e) => e.status === 'approved');
@@ -239,6 +247,12 @@ function createExpertsApi({ store, saveStore, id, auth, requireSessionUser }) {
       });
 
       app.get('/experts/requests/mine', auth, requireSessionUser, (req, res) => {
+        if (
+          bookingOccupancy &&
+          bookingOccupancy.expireStaleExpertRequests(store.expertRequests) > 0
+        ) {
+          saveStore();
+        }
         const uid = String(req.authUserId);
         const asRequester = [...store.expertRequests.values()]
           .filter((r) => String(r.fromUserId) === uid)
@@ -397,6 +411,14 @@ function createExpertsApi({ store, saveStore, id, auth, requireSessionUser }) {
           updatedAt: new Date().toISOString(),
         };
         store.expertRequests.set(requestId, row);
+        if (typeof notifyEvent === 'function' && expert.userId) {
+          notifyEvent(
+            expert.userId,
+            'طلب رأي خبير جديد',
+            message.slice(0, 120),
+            { type: 'expert_request', requestId, status: 'open' },
+          );
+        }
         saveStore();
         res.status(201).json(row);
       });
@@ -419,6 +441,9 @@ function createExpertsApi({ store, saveStore, id, auth, requireSessionUser }) {
               .status(403)
               .json({ message: 'فقط الخبير المعتمد يمكنه الرد' });
           }
+          if (String(row.status) !== 'open') {
+            return res.status(400).json({ message: 'الطلب مغلق ولا يقبل رداً' });
+          }
           const reply = String(req.body?.reply || '').trim();
           if (!reply) {
             return res.status(400).json({ message: 'نص الرد مطلوب' });
@@ -427,6 +452,52 @@ function createExpertsApi({ store, saveStore, id, auth, requireSessionUser }) {
           row.status = 'replied';
           row.updatedAt = new Date().toISOString();
           store.expertRequests.set(row.id, row);
+          if (typeof notifyEvent === 'function' && row.fromUserId) {
+            notifyEvent(
+              row.fromUserId,
+              'رد من الخبير',
+              reply.slice(0, 160),
+              { type: 'expert_request', requestId: row.id, status: 'replied' },
+            );
+          }
+          saveStore();
+          res.json(row);
+        },
+      );
+
+      app.patch(
+        '/experts/requests/:id/reject',
+        auth,
+        requireSessionUser,
+        (req, res) => {
+          const row = store.expertRequests.get(req.params.id);
+          if (!row) return res.status(404).json({ message: 'الطلب غير موجود' });
+          const myExpert = [...store.experts.values()].find(
+            (e) =>
+              String(e.userId) === String(req.authUserId) &&
+              e.status === 'approved' &&
+              String(e.id) === String(row.expertId),
+          );
+          if (!myExpert) {
+            return res
+              .status(403)
+              .json({ message: 'فقط الخبير المعتمد يمكنه الرفض' });
+          }
+          if (String(row.status) !== 'open') {
+            return res.status(400).json({ message: 'الطلب مغلق' });
+          }
+          row.status = 'rejected';
+          row.reply = String(req.body?.reason || '').trim() || null;
+          row.updatedAt = new Date().toISOString();
+          store.expertRequests.set(row.id, row);
+          if (typeof notifyEvent === 'function' && row.fromUserId) {
+            notifyEvent(
+              row.fromUserId,
+              'اعتذر الخبير عن الطلب',
+              row.reply || '',
+              { type: 'expert_request', requestId: row.id, status: 'rejected' },
+            );
+          }
           saveStore();
           res.json(row);
         },

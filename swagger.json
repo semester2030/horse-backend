@@ -222,10 +222,14 @@
       },
       "post": {
         "tags": ["bookings"],
-        "summary": "Create booking",
+        "summary": "Create booking (stable: occupancy check)",
         "security": [{ "bearerAuth": [] }],
         "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "201": { "description": "Created" } }
+        "responses": {
+          "201": { "description": "Created" },
+          "400": { "description": "Validation error" },
+          "409": { "description": "Occupancy full for range" }
+        }
       }
     },
     "/bookings/{id}": {
@@ -271,6 +275,22 @@
         "security": [{ "bearerAuth": [] }],
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/services/{id}/availability": {
+      "get": {
+        "tags": ["services"],
+        "summary": "Stable occupancy for date range",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "to", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Availability by day" },
+          "400": { "description": "Invalid range or not stable" },
+          "404": { "description": "Not found" }
+        }
       }
     },
     "/videos": {

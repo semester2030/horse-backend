@@ -290,6 +290,20 @@ function createAdminRouter(ctx) {
     }
     u.updatedAt = new Date().toISOString();
     ctx.store.users.set(u.id, u);
+    if (typeof ctx.notifyEvent === 'function') {
+      const titles = {
+        approve: 'تم اعتماد حسابك التجاري',
+        reject: 'رُفض طلب التحقق',
+        suspend: 'تم تعليق التحقق',
+        request_docs: 'مطلوب مستندات إضافية للتحقق',
+      };
+      ctx.notifyEvent(
+        u.id,
+        titles[action] || 'تحديث التحقق',
+        note || '',
+        { type: 'verification', action },
+      );
+    }
     ctx.saveStore();
     logAudit(ctx, {
       actorId: req.adminUserId,
@@ -625,7 +639,21 @@ function createAdminRouter(ctx) {
   router.patch('/orders/:id', requireAdminAuth, requirePerm('orders:write'), (req, res) => {
     const o = ctx.store.orders.get(req.params.id);
     if (!o) return res.status(404).json({ message: 'الطلب غير موجود' });
-    if (req.body.status) o.status = req.body.status;
+    const commerce = ctx.marketplaceCommerce;
+    if (req.body.status && commerce) {
+      const result = commerce.applyOrderStatusChange({
+        order: o,
+        nextStatus: String(req.body.status),
+        catalogItems: ctx.store.catalogItems,
+        role: 'admin',
+      });
+      if (!result.ok) {
+        return res.status(400).json({ message: result.message });
+      }
+      Object.assign(o, result.order);
+    } else if (req.body.status) {
+      o.status = req.body.status;
+    }
     if (req.body.adminNote) o.adminNote = req.body.adminNote;
     o.updatedAt = new Date().toISOString();
     ctx.store.orders.set(o.id, o);
@@ -643,7 +671,23 @@ function createAdminRouter(ctx) {
   router.patch('/bookings/:id', requireAdminAuth, requirePerm('bookings:write'), (req, res) => {
     const b = ctx.store.bookings.get(req.params.id);
     if (!b) return res.status(404).json({ message: 'الحجز غير موجود' });
-    if (req.body.status) b.status = req.body.status;
+    if (req.body.status) {
+      const next = String(req.body.status);
+      const prev = String(b.status || '');
+      const occ = ctx.bookingOccupancy;
+      const ok =
+        !occ ||
+        next === prev ||
+        occ.canProviderBookingTransition(prev, next) ||
+        next === 'cancelled' ||
+        next === 'expired';
+      if (!ok) {
+        return res.status(400).json({
+          message: `انتقال غير مسموح من ${prev} إلى ${next}`,
+        });
+      }
+      b.status = next;
+    }
     b.updatedAt = new Date().toISOString();
     ctx.store.bookings.set(b.id, b);
     ctx.saveStore();

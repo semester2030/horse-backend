@@ -40,6 +40,9 @@ const {
   isUserBlocked,
   ensureModerationStore,
 } = require('./content_moderation');
+const bookingOccupancy = require('./booking_occupancy');
+const marketplaceCommerce = require('./marketplace_commerce');
+const opsNotify = require('./ops_notify');
 
 let swaggerDocument;
 try {
@@ -144,6 +147,8 @@ const store = {
   expertRequests: new Map(),
   /** تقييمات الخبراء — مفتاح: ratingId */
   expertRatings: new Map(),
+  /** اهتمامات تواصل أعلاف/معدات — id → lead */
+  contactLeads: new Map(),
 };
 
 /** رموز OTP وإعداد الحساب (ذاكرة — تُعاد إرسالها عند الحاجة) */
@@ -242,6 +247,11 @@ function applyStoreSnapshot(data, sourceLabel) {
   } else {
     store.expertRatings = new Map();
   }
+  if (data.contactLeads && typeof data.contactLeads === 'object') {
+    store.contactLeads = new Map(Object.entries(data.contactLeads));
+  } else if (!store.contactLeads) {
+    store.contactLeads = new Map();
+  }
   ensureModerationStore(store);
   const catalogN = store.catalogItems.size;
   const videoN = store.videos.size;
@@ -283,6 +293,7 @@ function saveStore() {
       experts: Object.fromEntries(store.experts),
       expertRequests: Object.fromEntries(store.expertRequests),
       expertRatings: Object.fromEntries(store.expertRatings),
+      contactLeads: Object.fromEntries(store.contactLeads || []),
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
@@ -304,6 +315,27 @@ if (persistence.warning) {
 // توليد معرف فريد
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
+function notifyEvent(userId, title, body, meta) {
+  return opsNotify.notifyUser(
+    { store, id },
+    { userId, title, body, meta },
+  );
+}
+
+function runLazyExpiry() {
+  let dirty = false;
+  if (bookingOccupancy.expireStalePendingBookings(store.bookings) > 0) {
+    dirty = true;
+  }
+  if (
+    store.expertRequests &&
+    bookingOccupancy.expireStaleExpertRequests(store.expertRequests) > 0
+  ) {
+    dirty = true;
+  }
+  return dirty;
+}
+
 const adminCtx = {
   store,
   saveStore,
@@ -311,6 +343,9 @@ const adminCtx = {
   roles,
   verificationDir: VERIFICATION_DIR,
   adminJwtSecret: ADMIN_JWT_SECRET,
+  marketplaceCommerce,
+  bookingOccupancy,
+  notifyEvent,
 };
 seedSuperAdmin(adminCtx);
 
@@ -483,7 +518,15 @@ registerAppVerificationRoutes(app, adminCtx, auth, requireSessionUser);
 registerAccountLifecycleRoutes(app, { store, saveStore, auth, requireSessionUser });
 registerContentModerationRoutes(app, { store, saveStore, id, auth, requireSessionUser });
 
-const expertsApi = createExpertsApi({ store, saveStore, id, auth, requireSessionUser });
+const expertsApi = createExpertsApi({
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+  notifyEvent,
+  bookingOccupancy,
+});
 expertsApi.registerAppRoutes(app);
 
 function viewerFromToken(req) {
@@ -866,6 +909,16 @@ app.get('/horses', (req, res) => {
   if (limit) list = list.slice(0, Number(limit));
   list = stripSheepListings(list);
   list = filterListingsForViewer(list, viewerFromToken(req));
+  const viewerId = sessionUserIdFromToken(
+    (req.headers.authorization || '').startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : null,
+  );
+  list = list.filter((h) => {
+    if (bookingOccupancy.isListingPubliclyVisible(h)) return true;
+    const owner = String(h.sellerId || h.userId || h.ownerId || '');
+    return viewerId && owner === viewerId;
+  });
   res.json(list.map((h) => heritageTB.scrubItemTags(h)));
 });
 
@@ -896,6 +949,7 @@ app.post('/horses', auth, requireSessionUser, (req, res) => {
     tags: heritageTB.sanitizeTags(body.tags, species),
     badges: [],
     species,
+    listingStatus: bookingOccupancy.listingStatusOf(body) || 'available',
     userId: req.authUserId,
     sellerId: req.authUserId,
     createdAt: new Date().toISOString(),
@@ -905,10 +959,14 @@ app.post('/horses', auth, requireSessionUser, (req, res) => {
   res.status(201).json(heritageTB.scrubItemTags(horse));
 });
 
-app.patch('/horses/:id', auth, (req, res) => {
+app.patch('/horses/:id', auth, requireSessionUser, (req, res) => {
   const { id } = req.params;
   const existing = store.horses.get(id);
   if (!existing) return res.status(404).json({ message: 'الخيل غير موجود' });
+  const ownerId = String(existing.sellerId || existing.userId || '');
+  if (ownerId !== req.authUserId) {
+    return res.status(403).json({ message: 'غير مصرح بتعديل هذا الإعلان' });
+  }
   const mergedSpecies =
     req.body?.species || req.body?.listingSpecies || existing.species || 'horse';
   if (isSheepSpecies(mergedSpecies) && rejectSheepPaused(res)) return;
@@ -917,14 +975,31 @@ app.patch('/horses/:id', auth, (req, res) => {
     if (sheepErr) return res.status(400).json({ message: sheepErr });
   }
   const body = heritageTB.applyClientListingFields(req.body || {}, existing);
+  const nextListingStatus = body.listingStatus || body.status;
+  if (
+    nextListingStatus != null &&
+    String(nextListingStatus) !== bookingOccupancy.listingStatusOf(existing)
+  ) {
+    const from = bookingOccupancy.listingStatusOf(existing);
+    const to = String(nextListingStatus).trim().toLowerCase();
+    if (!bookingOccupancy.canListingStatusTransition(from, to)) {
+      return res.status(400).json({
+        message: `انتقال حالة الإعلان غير مسموح من ${from} إلى ${to}`,
+      });
+    }
+    body.listingStatus = to;
+  }
   const updated = {
     ...existing,
     ...body,
     id,
+    sellerId: existing.sellerId || existing.userId,
+    userId: existing.userId || existing.sellerId,
     badges: Array.isArray(existing.badges) ? existing.badges : [],
+    listingStatus:
+      body.listingStatus || bookingOccupancy.listingStatusOf(existing),
     updatedAt: new Date().toISOString(),
   };
-  // دائماً: أعد تصفية الوسوم حسب النوع النهائي (يمنع تسرّب نوع سابق)
   updated.tags = heritageTB.sanitizeTags(updated.tags, mergedSpecies);
   if (req.body.stats && typeof req.body.stats === 'object') {
     updated.stats = { ...(existing.stats || {}), ...req.body.stats };
@@ -966,48 +1041,320 @@ app.delete('/favorites/:userId/items/:horseId', auth, (req, res) => {
 });
 
 // ========== Bookings ==========
-app.get('/bookings', auth, (req, res) => {
+app.get('/bookings', auth, requireSessionUser, (req, res) => {
+  if (runLazyExpiry()) saveStore();
   const { providerId, customerId, status } = req.query;
+  const sid = req.authUserId;
+  if (!providerId && !customerId) {
+    return res.status(400).json({
+      message: 'providerId أو customerId مطلوب',
+    });
+  }
+  if (providerId && String(providerId) !== String(sid)) {
+    return res.status(403).json({ message: 'غير مصرح بعرض حجوزات مزود آخر' });
+  }
+  if (customerId && String(customerId) !== String(sid)) {
+    return res.status(403).json({ message: 'غير مصرح بعرض حجوزات عميل آخر' });
+  }
   let list = [...store.bookings.values()];
-  if (providerId) list = list.filter(b => String(b.providerId || '') === String(providerId));
-  if (customerId) list = list.filter(b => String(b.userId || '') === String(customerId));
-  if (status) list = list.filter(b => b.status === status);
+  if (providerId) {
+    list = list.filter((b) => String(b.providerId || '') === String(providerId));
+  }
+  if (customerId) {
+    list = list.filter((b) => String(b.userId || '') === String(customerId));
+  }
+  if (status) list = list.filter((b) => b.status === status);
   res.json(list);
 });
 
-app.post('/bookings', auth, (req, res) => {
+app.post('/bookings', auth, requireSessionUser, (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const kind = String(body.type || body.serviceType || '')
+    .trim()
+    .toLowerCase();
+
+  let payload = { ...body };
+  const serviceId = String(body.serviceId || '').trim();
+
+  if (kind === 'stable') {
+    if (!serviceId) {
+      return res.status(400).json({ message: 'serviceId مطلوب لحجز الإيواء' });
+    }
+    const service = store.services.get(serviceId);
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة الإيواء غير موجودة' });
+    }
+    payload = bookingOccupancy.normalizeStableBookingPayload(body, service);
+    if (!payload.startDate || !payload.endDate) {
+      return res.status(400).json({ message: 'تاريخ البداية والنهاية مطلوبان' });
+    }
+    const startKey = bookingOccupancy.toDayKey(payload.startDate);
+    const endKey = bookingOccupancy.toDayKey(payload.endDate);
+    if (!startKey || !endKey) {
+      return res.status(400).json({ message: 'تواريخ الإيواء غير صالحة' });
+    }
+    if (endKey < startKey) {
+      return res.status(400).json({
+        message: 'تاريخ النهاية يجب أن يكون بعد تاريخ البداية أو يساويه',
+      });
+    }
+
+    const occupancy = bookingOccupancy.evaluateStableOccupancy({
+      service,
+      bookings: [...store.bookings.values()],
+      startDate: payload.startDate,
+      endDate: payload.endDate,
+      spacesRequested: payload.spacesRequested,
+    });
+    if (!occupancy.ok) {
+      return res.status(409).json({
+        code: 'OCCUPANCY_FULL',
+        message: occupancy.message || 'الفترة غير متاحة',
+        totalSpaces: occupancy.totalSpaces,
+        minAvailable: occupancy.minAvailable,
+        peakUsed: occupancy.peakUsed,
+        days: occupancy.days,
+      });
+    }
+  } else if (kind === 'transportation' || kind === 'transport') {
+    if (!serviceId) {
+      return res.status(400).json({ message: 'serviceId مطلوب لحجز النقل' });
+    }
+    const service = store.services.get(serviceId);
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة النقل غير موجودة' });
+    }
+    payload = bookingOccupancy.normalizeTransportationBookingPayload(body);
+    payload.serviceId = serviceId;
+    payload.providerId = payload.providerId || service.providerId;
+    const origin = payload.details?.origin;
+    const destination = payload.details?.destination;
+    if (
+      origin == null ||
+      destination == null ||
+      origin.latitude == null ||
+      origin.longitude == null ||
+      destination.latitude == null ||
+      destination.longitude == null
+    ) {
+      return res.status(400).json({
+        message: 'نقطة البداية والوجهة (إحداثيات) مطلوبتان لحجز النقل',
+      });
+    }
+    const bookingDate =
+      payload.bookingDate ||
+      payload.details?.bookingDate ||
+      payload.startDate ||
+      new Date().toISOString();
+    payload.bookingDate = bookingDate;
+    const cap = bookingOccupancy.evaluateTransportCapacity({
+      service,
+      bookings: [...store.bookings.values()],
+      unitsRequested: bookingOccupancy.unitsRequestedOf(payload),
+      bookingDate,
+    });
+    if (!cap.ok) {
+      return res.status(409).json({
+        code: 'TRANSPORT_CAPACITY',
+        message: cap.message || 'سعة النقل غير كافية',
+        capacity: cap.capacity,
+        available: cap.available,
+        used: cap.used,
+      });
+    }
+  } else if (kind === 'veterinary' || kind === 'vet') {
+    if (!serviceId) {
+      return res.status(400).json({ message: 'serviceId مطلوب للحجز البيطري' });
+    }
+    const service = store.services.get(serviceId);
+    if (!service) {
+      return res.status(404).json({ message: 'العيادة غير موجودة' });
+    }
+    payload.type = 'veterinary';
+    payload.serviceType = 'veterinary';
+    payload.serviceId = serviceId;
+    payload.providerId = payload.providerId || service.providerId;
+    const bookingDate =
+      payload.bookingDate ||
+      payload.details?.bookingDate ||
+      payload.startDate;
+    if (!bookingDate) {
+      return res.status(400).json({ message: 'تاريخ الموعد مطلوب' });
+    }
+    payload.bookingDate = bookingDate;
+    const details =
+      payload.details && typeof payload.details === 'object'
+        ? { ...payload.details }
+        : {};
+    const appointmentTime =
+      payload.appointmentTime || details.appointmentTime || details.timeSlot || '';
+    if (appointmentTime) {
+      payload.appointmentTime = appointmentTime;
+      details.appointmentTime = appointmentTime;
+    }
+    payload.details = details;
+    const vetCheck = bookingOccupancy.evaluateVetAvailability({
+      service,
+      bookings: [...store.bookings.values()],
+      bookingDate,
+      appointmentTime,
+    });
+    if (!vetCheck.ok) {
+      return res.status(409).json({
+        code: vetCheck.code || 'VET_UNAVAILABLE',
+        message: vetCheck.message || 'الموعد غير متاح',
+      });
+    }
+  }
+
   const bookingId = id();
-  const booking = { id: bookingId, ...req.body, createdAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const booking = {
+    id: bookingId,
+    ...payload,
+    userId: req.authUserId,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
+  };
   store.bookings.set(bookingId, booking);
+  if (booking.providerId) {
+    notifyEvent(
+      booking.providerId,
+      'حجز جديد',
+      `${booking.serviceName || booking.type || 'خدمة'} — بانتظار القبول`,
+      { type: 'booking', bookingId, status: 'pending' },
+    );
+  }
   saveStore();
   res.status(201).json(booking);
 });
 
-app.patch('/bookings/:id', auth, (req, res) => {
+app.patch('/bookings/:id', auth, requireSessionUser, (req, res) => {
   const { id } = req.params;
   const existing = store.bookings.get(id);
   if (!existing) return res.status(404).json({ message: 'الحجز غير موجود' });
 
-  if (req.body != null && Object.prototype.hasOwnProperty.call(req.body, 'status')) {
-    const sid = sessionUserIdFromToken(req.token);
-    if (!sid) {
-      return res.status(401).json({ message: 'أعد تسجيل الدخول لتعديل حالة الحجز' });
-    }
-    const isProvider = String(existing.providerId || '') === sid;
-    const isCustomer = String(existing.userId || '') === sid;
-    if (!isProvider && !isCustomer) {
-      return res.status(403).json({ message: 'غير مصرح بتعديل هذا الحجز' });
-    }
-    if (isCustomer) {
-      const st = String(req.body.status);
-      if (st !== 'cancelled') {
-        return res.status(403).json({ message: 'يمكن للعميل إلغاء الحجز فقط (حالة cancelled)' });
+  const sid = req.authUserId;
+  const isProvider = String(existing.providerId || '') === sid;
+  const isCustomer = String(existing.userId || '') === sid;
+  if (!isProvider && !isCustomer) {
+    return res.status(403).json({ message: 'غير مصرح بتعديل هذا الحجز' });
+  }
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const nextStatus =
+    body.status != null ? String(body.status) : null;
+  const prevStatus = String(existing.status || 'pending');
+
+  if (nextStatus && nextStatus !== prevStatus) {
+    if (isCustomer && !isProvider) {
+      if (nextStatus !== 'cancelled') {
+        return res.status(403).json({
+          message: 'يمكن للعميل إلغاء الحجز فقط (حالة cancelled)',
+        });
+      }
+      if (!bookingOccupancy.canCustomerCancelBooking(prevStatus)) {
+        return res.status(400).json({
+          message: 'لا يمكن إلغاء الحجز في هذه المرحلة',
+        });
+      }
+    } else if (isProvider) {
+      if (!bookingOccupancy.canProviderBookingTransition(prevStatus, nextStatus)) {
+        return res.status(400).json({
+          message: `انتقال غير مسموح من ${prevStatus} إلى ${nextStatus}`,
+        });
       }
     }
   }
 
-  const updated = { ...existing, ...req.body, id, updatedAt: new Date().toISOString() };
+  const updated = {
+    ...existing,
+    id,
+    userId: existing.userId,
+    providerId: existing.providerId,
+    serviceId: existing.serviceId,
+    type: existing.type,
+    serviceType: existing.serviceType || existing.type,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (nextStatus) updated.status = nextStatus;
+
+  if (isProvider || isCustomer) {
+    if (body.notes != null) updated.notes = body.notes;
+  }
+
+  // تعديل تواريخ/مساحات الإيواء — مزوّد فقط + إعادة فحص
+  const touchesStableSchedule =
+    body.startDate != null ||
+    body.endDate != null ||
+    body.spacesRequested != null ||
+    (body.details &&
+      (body.details.startDate != null ||
+        body.details.endDate != null ||
+        body.details.spacesRequested != null));
+
+  if (touchesStableSchedule) {
+    if (!isProvider) {
+      return res.status(403).json({ message: 'تعديل التواريخ للمزوّد فقط' });
+    }
+    if (!bookingOccupancy.isStableBooking(updated)) {
+      return res.status(400).json({ message: 'تعديل الفترة متاح لإيواء فقط' });
+    }
+    const service = store.services.get(String(updated.serviceId || ''));
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة الإيواء غير موجودة' });
+    }
+    const merged = bookingOccupancy.normalizeStableBookingPayload(
+      { ...updated, ...body },
+      service,
+    );
+    const occupancy = bookingOccupancy.evaluateStableOccupancy({
+      service,
+      bookings: [...store.bookings.values()],
+      startDate: merged.startDate,
+      endDate: merged.endDate,
+      spacesRequested: merged.spacesRequested,
+      excludeBookingId: id,
+    });
+    if (!occupancy.ok) {
+      return res.status(409).json({
+        code: 'OCCUPANCY_FULL',
+        message: occupancy.message || 'الفترة غير متاحة',
+        days: occupancy.days,
+      });
+    }
+    Object.assign(updated, {
+      startDate: merged.startDate,
+      endDate: merged.endDate,
+      spacesRequested: merged.spacesRequested,
+      bookingDate: merged.bookingDate,
+      details: merged.details,
+    });
+  }
+
   store.bookings.set(id, updated);
+
+  if (nextStatus && nextStatus !== prevStatus) {
+    if (isProvider && existing.userId) {
+      notifyEvent(
+        existing.userId,
+        'تحديث حجزك',
+        `الحالة: ${nextStatus}`,
+        { type: 'booking', bookingId: id, status: nextStatus },
+      );
+    }
+    if (isCustomer && nextStatus === 'cancelled' && existing.providerId) {
+      notifyEvent(
+        existing.providerId,
+        'إلغاء حجز',
+        'ألقى العميل حجزه',
+        { type: 'booking', bookingId: id, status: 'cancelled' },
+      );
+    }
+  }
+
   saveStore();
   res.json(updated);
 });
@@ -1031,6 +1378,35 @@ app.get('/services', (req, res) => {
   res.json(list);
 });
 
+/** توفر إيواء حسب الفترة — لا يكرر منطق الحجز؛ يستخدم booking_occupancy فقط */
+app.get('/services/:id/availability', (req, res) => {
+  const service = store.services.get(req.params.id);
+  if (!service) {
+    return res.status(404).json({ message: 'الخدمة غير موجودة' });
+  }
+  const kind = String(service.type || service.serviceType || '')
+    .trim()
+    .toLowerCase();
+  if (kind !== 'stable') {
+    return res.status(400).json({ message: 'التوفر اليومي متاح لخدمات الإيواء فقط' });
+  }
+  const from = String(req.query.from || '').trim();
+  const to = String(req.query.to || '').trim();
+  if (!from || !to) {
+    return res.status(400).json({ message: 'from و to مطلوبان (YYYY-MM-DD أو ISO)' });
+  }
+  if (!bookingOccupancy.toDayKey(from) || !bookingOccupancy.toDayKey(to)) {
+    return res.status(400).json({ message: 'تواريخ غير صالحة' });
+  }
+  const payload = bookingOccupancy.buildAvailabilityPayload({
+    service,
+    bookings: [...store.bookings.values()],
+    from,
+    to,
+  });
+  res.json(payload);
+});
+
 app.post('/services', auth, requireSessionUser, (req, res) => {
   const serviceType = String(req.body?.type || req.body?.serviceType || '').trim();
   const err = roles.assertServiceCreate(req.authUser, serviceType);
@@ -1050,19 +1426,34 @@ app.post('/services', auth, requireSessionUser, (req, res) => {
   res.status(201).json(service);
 });
 
-app.patch('/services/:id', auth, (req, res) => {
+app.patch('/services/:id', auth, requireSessionUser, (req, res) => {
   const { id } = req.params;
   const existing = store.services.get(id);
   if (!existing) return res.status(404).json({ message: 'الخدمة غير موجودة' });
-  const updated = { ...existing, ...req.body, id, updatedAt: new Date().toISOString() };
+  if (String(existing.providerId || '') !== req.authUserId) {
+    return res.status(403).json({ message: 'غير مصرح بتعديل هذه الخدمة' });
+  }
+  const updated = {
+    ...existing,
+    ...req.body,
+    id,
+    providerId: existing.providerId,
+    updatedAt: new Date().toISOString(),
+  };
   store.services.set(id, updated);
+  saveStore();
   res.json(updated);
 });
 
-app.delete('/services/:id', auth, (req, res) => {
+app.delete('/services/:id', auth, requireSessionUser, (req, res) => {
   const { id } = req.params;
-  if (!store.services.has(id)) return res.status(404).json({ message: 'الخدمة غير موجودة' });
+  const existing = store.services.get(id);
+  if (!existing) return res.status(404).json({ message: 'الخدمة غير موجودة' });
+  if (String(existing.providerId || '') !== req.authUserId) {
+    return res.status(403).json({ message: 'غير مصرح بحذف هذه الخدمة' });
+  }
   store.services.delete(id);
+  saveStore();
   res.status(200).send();
 });
 
@@ -1133,8 +1524,16 @@ app.get('/catalog/items', auth, (req, res) => {
   const clientLng = parseFloat(req.query.lng);
   const hasClientLoc = Number.isFinite(clientLat) && Number.isFinite(clientLng);
   const sort = String(req.query.sort || '');
+  // بائع يدير منتجاته: يعيد النشطة والموقوفة؛ المتصفح يرى النشطة فقط.
+  const sessionEntry = store.accessTokens.get(req.token);
+  const sessionUserId = sessionEntry?.userId ? String(sessionEntry.userId) : null;
+  const sellerManagingOwn =
+    Boolean(sellerId) && Boolean(sessionUserId) && String(sellerId) === sessionUserId;
 
-  let list = [...store.catalogItems.values()].filter((i) => (i.status || 'active') === 'active');
+  let list = [...store.catalogItems.values()];
+  if (!sellerManagingOwn) {
+    list = list.filter((i) => (i.status || 'active') === 'active');
+  }
   if (category) list = list.filter((i) => String(i.category || '') === category);
   if (species && species !== 'all') list = list.filter((i) => catalogMatchesSpecies(i, species));
   if (subCategory) {
@@ -1203,6 +1602,12 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
     contactWhatsapp: body.contactWhatsapp ? String(body.contactWhatsapp) : '',
     condition: body.condition ? String(body.condition) : 'new',
     inStock: body.inStock !== false,
+    stockQuantity:
+      category === 'supplies'
+        ? marketplaceCommerce.normalizeStockQuantity(
+            body.stockQuantity != null ? body.stockQuantity : 100,
+          )
+        : marketplaceCommerce.normalizeStockQuantity(body.stockQuantity),
     shopType:
       req.authUser.accountRole === roles.ACCOUNT_ROLES.vet_clinic && category === 'supplies'
         ? 'vet'
@@ -1211,6 +1616,7 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  marketplaceCommerce.syncInStockFlag(item);
   store.catalogItems.set(itemId, item);
   saveStore();
   res.status(201).json(item);
@@ -1223,16 +1629,46 @@ app.patch('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
   if (String(existing.sellerId || '') !== req.authUserId) {
     return res.status(403).json({ message: 'غير مصرح بتعديل هذا المنتج' });
   }
+  const body = req.body || {};
   const updated = {
     ...existing,
-    ...req.body,
     id,
     sellerId: existing.sellerId,
+    category: existing.category,
     updatedAt: new Date().toISOString(),
   };
-  if (req.body.applicableSpecies != null) {
-    updated.applicableSpecies = parseSpeciesList(req.body.applicableSpecies);
+  if (body.name != null) updated.name = String(body.name).trim();
+  if (body.description != null) updated.description = String(body.description).trim();
+  if (body.subCategory != null) updated.subCategory = String(body.subCategory).trim();
+  if (body.price != null) updated.price = Number(body.price) || 0;
+  if (body.unit != null) updated.unit = String(body.unit).trim();
+  if (body.currency != null) updated.currency = String(body.currency);
+  if (body.images != null && Array.isArray(body.images)) {
+    updated.images = body.images.map(String);
   }
+  if (body.location != null && typeof body.location === 'object') {
+    updated.location = body.location;
+  }
+  if (body.contactPhone != null) updated.contactPhone = String(body.contactPhone);
+  if (body.contactWhatsapp != null) updated.contactWhatsapp = String(body.contactWhatsapp);
+  if (body.condition != null) updated.condition = String(body.condition);
+  if (body.status != null) {
+    const st = String(body.status).trim();
+    if (st === 'active' || st === 'inactive') updated.status = st;
+  }
+  if (body.stockQuantity !== undefined) {
+    updated.stockQuantity = marketplaceCommerce.normalizeStockQuantity(body.stockQuantity);
+  }
+  if (body.inStock !== undefined && body.stockQuantity === undefined) {
+    updated.inStock = body.inStock !== false;
+    if (updated.inStock === false && updated.stockQuantity != null) {
+      updated.stockQuantity = 0;
+    }
+  }
+  if (body.applicableSpecies != null) {
+    updated.applicableSpecies = parseSpeciesList(body.applicableSpecies);
+  }
+  marketplaceCommerce.syncInStockFlag(updated);
   store.catalogItems.set(id, updated);
   saveStore();
   res.json(updated);
@@ -1276,6 +1712,23 @@ app.post('/cart/items', auth, requireSessionUser, (req, res) => {
     return res.status(400).json({ message: 'المنتج غير متوفر' });
   }
   const cart = getOrCreateCart(req.authUserId);
+  const idx = cart.items.findIndex((l) => l.catalogItemId === product.id);
+  const currentQty = idx >= 0 ? cart.items[idx].quantity || 0 : 0;
+  const nextQty = currentQty + qty;
+  const avail = marketplaceCommerce.availableStock(product, {
+    forUserId: req.authUserId,
+  });
+  if (avail < nextQty) {
+    const availLabel = avail === Number.POSITIVE_INFINITY ? null : avail;
+    return res.status(409).json({
+      message:
+        avail <= 0
+          ? 'المنتج نفذ من المخزون'
+          : `الكمية المتاحة ${availLabel} فقط`,
+      available: availLabel,
+      code: 'OUT_OF_STOCK',
+    });
+  }
   const imageUrl =
     Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : '';
   const snapshot = {
@@ -1286,13 +1739,14 @@ app.post('/cart/items', auth, requireSessionUser, (req, res) => {
     unit: product.unit || '',
     subCategory: product.subCategory || '',
   };
-  const idx = cart.items.findIndex((l) => l.catalogItemId === product.id);
   if (idx >= 0) {
-    cart.items[idx].quantity += qty;
+    cart.items[idx].quantity = nextQty;
     cart.items[idx].snapshot = snapshot;
   } else {
     cart.items.push({ catalogItemId: product.id, quantity: qty, snapshot });
   }
+  marketplaceCommerce.setCartHold(product, req.authUserId, nextQty);
+  store.catalogItems.set(product.id, product);
   cart.updatedAt = new Date().toISOString();
   store.carts.set(req.authUserId, cart);
   saveStore();
@@ -1305,9 +1759,42 @@ app.patch('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) => 
   const qty = parseInt(req.body?.quantity, 10);
   const idx = cart.items.findIndex((l) => l.catalogItemId === lineId);
   if (idx < 0) return res.status(404).json({ message: 'العنصر غير موجود في السلة' });
+  const product = store.catalogItems.get(lineId);
   if (!Number.isFinite(qty) || qty < 1) {
     cart.items.splice(idx, 1);
+    if (product) {
+      marketplaceCommerce.clearCartHold(product, req.authUserId);
+      store.catalogItems.set(product.id, product);
+    }
   } else {
+    if (product) {
+      const avail = marketplaceCommerce.availableStock(product, {
+        forUserId: req.authUserId,
+      });
+      if (avail < qty) {
+        const availLabel = avail === Number.POSITIVE_INFINITY ? null : avail;
+        return res.status(409).json({
+          message:
+            avail <= 0
+              ? 'المنتج نفذ من المخزون'
+              : `الكمية المتاحة ${availLabel} فقط`,
+          available: availLabel,
+          code: 'OUT_OF_STOCK',
+        });
+      }
+      const imageUrl =
+        Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : '';
+      cart.items[idx].snapshot = {
+        name: product.name,
+        price: Number(product.price) || 0,
+        imageUrl,
+        sellerId: product.sellerId,
+        unit: product.unit || '',
+        subCategory: product.subCategory || '',
+      };
+      marketplaceCommerce.setCartHold(product, req.authUserId, qty);
+      store.catalogItems.set(product.id, product);
+    }
     cart.items[idx].quantity = qty;
   }
   cart.updatedAt = new Date().toISOString();
@@ -1318,7 +1805,13 @@ app.patch('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) => 
 
 app.delete('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) => {
   const cart = getOrCreateCart(req.authUserId);
-  cart.items = cart.items.filter((l) => l.catalogItemId !== req.params.catalogItemId);
+  const lineId = req.params.catalogItemId;
+  const product = store.catalogItems.get(lineId);
+  if (product) {
+    marketplaceCommerce.clearCartHold(product, req.authUserId);
+    store.catalogItems.set(product.id, product);
+  }
+  cart.items = cart.items.filter((l) => l.catalogItemId !== lineId);
   cart.updatedAt = new Date().toISOString();
   store.carts.set(req.authUserId, cart);
   saveStore();
@@ -1326,7 +1819,19 @@ app.delete('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) =>
 });
 
 app.delete('/cart', auth, requireSessionUser, (req, res) => {
-  store.carts.set(req.authUserId, { userId: req.authUserId, items: [], updatedAt: new Date().toISOString() });
+  const cart = getOrCreateCart(req.authUserId);
+  for (const line of cart.items || []) {
+    const product = store.catalogItems.get(String(line.catalogItemId || ''));
+    if (product) {
+      marketplaceCommerce.clearCartHold(product, req.authUserId);
+      store.catalogItems.set(product.id, product);
+    }
+  }
+  store.carts.set(req.authUserId, {
+    userId: req.authUserId,
+    items: [],
+    updatedAt: new Date().toISOString(),
+  });
   saveStore();
   res.json(store.carts.get(req.authUserId));
 });
@@ -1373,34 +1878,63 @@ app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
   }
   const shippingAddress = req.body?.shippingAddress || {};
   const paymentMethod = String(req.body?.paymentMethod || 'cash');
+  if (paymentMethod === 'card') {
+    return res.status(400).json({
+      message: 'الدفع بالبطاقة غير متاح حالياً — استخدم الدفع عند الاستلام',
+    });
+  }
   const buyer = store.users.get(req.authUserId) || {};
   const customerName = String(buyer.name || buyer.displayName || buyer.email || 'عميل');
   const customerPhone = String(buyer.phone || '');
 
-  const bySeller = new Map();
+  const catalogMap = new Map();
   for (const line of cart.items) {
-    const seller = String(line.snapshot?.sellerId || '');
+    const pid = String(line.catalogItemId || '');
+    if (!catalogMap.has(pid)) {
+      const p = store.catalogItems.get(pid);
+      if (p) catalogMap.set(pid, p);
+    }
+  }
+
+  const validated = marketplaceCommerce.validateCartLines(cart.items, catalogMap, {
+    forUserId: req.authUserId,
+  });
+  if (!validated.ok) {
+    return res.status(409).json({
+      message: validated.issues[0]?.message || 'تعذر إتمام الطلب — تحقق من السلة',
+      issues: validated.issues,
+      code: 'CART_INVALID',
+    });
+  }
+
+  for (const line of validated.lines) {
+    marketplaceCommerce.clearCartHold(line.product, req.authUserId);
+    marketplaceCommerce.decrementStock(line.product, line.quantity);
+    store.catalogItems.set(line.product.id, line.product);
+  }
+
+  const bySeller = new Map();
+  for (const line of validated.lines) {
+    const seller = String(line.sellerId || '');
+    if (!seller) continue;
     if (!bySeller.has(seller)) bySeller.set(seller, []);
     bySeller.get(seller).push(line);
   }
 
   const created = [];
   for (const [sellerId, lines] of bySeller.entries()) {
-    if (!sellerId) continue;
     let total = 0;
     const orderLines = lines.map((l) => {
-      const unit = Number(l.snapshot?.price) || 0;
-      total += unit * (l.quantity || 1);
+      total += l.unitPrice * l.quantity;
       return {
         catalogItemId: l.catalogItemId,
-        quantity: l.quantity || 1,
-        title: l.snapshot?.name || '',
-        unitPrice: unit,
-        imageUrl: l.snapshot?.imageUrl || '',
+        quantity: l.quantity,
+        title: l.title,
+        unitPrice: l.unitPrice,
+        imageUrl: l.imageUrl,
       };
     });
     const orderId = id();
-    const status = paymentMethod === 'card' ? 'pending_payment' : 'paid';
     const order = {
       id: orderId,
       userId: req.authUserId,
@@ -1410,9 +1944,10 @@ app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
       lines: orderLines,
       total: Math.round(total * 100) / 100,
       currency: 'SAR',
-      status,
-      paymentMethod,
-      paymentStatus: status === 'paid' ? 'completed' : 'pending',
+      status: 'paid',
+      paymentMethod: 'cash',
+      paymentStatus: 'completed',
+      stockDeducted: true,
       shippingAddress,
       trackingNumber: '',
       createdAt: new Date().toISOString(),
@@ -1420,9 +1955,27 @@ app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
     };
     store.orders.set(orderId, order);
     created.push(order);
+    notifyEvent(
+      sellerId,
+      'طلب متجر جديد',
+      `${orderLines.length} صنف · ${order.total} ر.س`,
+      { type: 'order', orderId, status: 'paid' },
+    );
   }
 
-  store.carts.set(req.authUserId, { userId: req.authUserId, items: [], updatedAt: new Date().toISOString() });
+  if (created.length === 0) {
+    for (const line of validated.lines) {
+      marketplaceCommerce.restoreStock(line.product, line.quantity);
+      store.catalogItems.set(line.product.id, line.product);
+    }
+    return res.status(400).json({ message: 'تعذر إنشاء الطلب — بائع غير محدد' });
+  }
+
+  store.carts.set(req.authUserId, {
+    userId: req.authUserId,
+    items: [],
+    updatedAt: new Date().toISOString(),
+  });
   saveStore();
   res.status(201).json({ orders: created });
 });
@@ -1438,20 +1991,48 @@ app.patch('/orders/:id', auth, requireSessionUser, (req, res) => {
     return res.status(403).json({ message: 'غير مصرح' });
   }
   const body = req.body || {};
-  if (isCustomer && body.status && body.status !== 'cancelled') {
-    return res.status(403).json({ message: 'يمكن للعميل الإلغاء فقط' });
+  const nextStatus = body.status != null ? String(body.status) : null;
+
+  if (!nextStatus) {
+    if (isSeller && body.trackingNumber != null) {
+      const patched = {
+        ...existing,
+        trackingNumber: String(body.trackingNumber),
+        updatedAt: new Date().toISOString(),
+      };
+      store.orders.set(id, patched);
+      saveStore();
+      return res.json(patched);
+    }
+    return res.status(400).json({ message: 'status مطلوب' });
   }
-  const updated = {
-    ...existing,
-    ...body,
-    id,
-    userId: existing.userId,
-    sellerId: existing.sellerId,
-    updatedAt: new Date().toISOString(),
-  };
-  store.orders.set(id, updated);
+
+  const role = isSeller ? 'seller' : 'customer';
+  const result = marketplaceCommerce.applyOrderStatusChange({
+    order: existing,
+    nextStatus,
+    catalogItems: store.catalogItems,
+    role,
+    trackingNumber: isSeller ? body.trackingNumber : undefined,
+  });
+  if (!result.ok) {
+    return res.status(400).json({ message: result.message });
+  }
+
+  store.orders.set(id, result.order);
+  if (result.changed) {
+    const peer = isSeller ? existing.userId : existing.sellerId;
+    if (peer) {
+      notifyEvent(
+        peer,
+        'تحديث طلب المتجر',
+        `الحالة: ${result.order.status}`,
+        { type: 'order', orderId: id, status: result.order.status },
+      );
+    }
+  }
   saveStore();
-  res.json(updated);
+  res.json(result.order);
 });
 
 // ========== Videos ==========
@@ -1990,7 +2571,58 @@ app.get('/dashboard/summary', auth, requireSessionUser, (req, res) => {
 });
 
 // ========== CRM — طلبات قيد الانتظار لمقدم الخدمة ==========
+app.post('/crm/contact-leads', auth, requireSessionUser, (req, res) => {
+  const catalogItemId = String(req.body?.catalogItemId || '').trim();
+  const channel = String(req.body?.channel || 'phone').trim().toLowerCase();
+  if (!catalogItemId) {
+    return res.status(400).json({ message: 'catalogItemId مطلوب' });
+  }
+  const item = store.catalogItems.get(catalogItemId);
+  if (!item) return res.status(404).json({ message: 'المنتج غير موجود' });
+  const cat = String(item.category || '');
+  if (cat !== 'feed' && cat !== 'equipment') {
+    return res.status(400).json({
+      message: 'تسجيل الاهتمام متاح لأعلاف والمعدات فقط',
+    });
+  }
+  const sellerId = String(item.sellerId || '');
+  if (!sellerId) {
+    return res.status(400).json({ message: 'البائع غير محدد' });
+  }
+  if (sellerId === req.authUserId) {
+    return res.status(400).json({ message: 'لا يمكن تسجيل اهتمام على منتجك' });
+  }
+  const buyer = store.users.get(req.authUserId) || {};
+  const leadId = id();
+  const lead = {
+    id: leadId,
+    source: 'contact',
+    type: cat === 'feed' ? 'feed_contact' : 'equipment_contact',
+    catalogItemId,
+    serviceName: item.name || '',
+    category: cat,
+    channel: channel === 'whatsapp' ? 'whatsapp' : 'phone',
+    sellerId,
+    userId: req.authUserId,
+    customerName: String(buyer.name || buyer.displayName || buyer.email || 'عميل'),
+    customerPhone: String(buyer.phone || ''),
+    status: 'open',
+    createdAt: new Date().toISOString(),
+  };
+  if (!store.contactLeads) store.contactLeads = new Map();
+  store.contactLeads.set(leadId, lead);
+  notifyEvent(
+    sellerId,
+    cat === 'feed' ? 'اهتمام بمنتج أعلاف' : 'اهتمام بمعدة',
+    `${lead.customerName} تواصل عبر ${lead.channel} — ${lead.serviceName}`,
+    { type: 'contact_lead', leadId, catalogItemId },
+  );
+  saveStore();
+  res.status(201).json(lead);
+});
+
 app.get('/crm/leads', auth, requireSessionUser, (req, res) => {
+  if (runLazyExpiry()) saveStore();
   const userId = String(req.query.userId || '').trim();
   if (!userId) {
     return res.status(400).json({ message: 'userId مطلوب' });
@@ -2004,17 +2636,52 @@ app.get('/crm/leads', auth, requireSessionUser, (req, res) => {
         String(b.providerId || '') === userId &&
         String(b.status || 'pending') === 'pending',
     )
-    .map((b) => ({
-      id: b.id,
-      source: 'booking',
-      type: b.type || b.serviceType,
-      serviceName: b.serviceName,
-      customerName: b.customerName,
-      customerPhone: b.customerPhone,
-      totalPrice: b.totalPrice,
-      createdAt: b.createdAt,
-      userId: b.userId,
-    }));
+    .map((b) => {
+      const details =
+        b.details && typeof b.details === 'object' ? b.details : {};
+      const origin =
+        details.origin && typeof details.origin === 'object'
+          ? details.origin
+          : null;
+      const destination =
+        details.destination && typeof details.destination === 'object'
+          ? details.destination
+          : null;
+      return {
+        id: b.id,
+        source: 'booking',
+        type: b.type || b.serviceType,
+        serviceId: b.serviceId,
+        serviceName: b.serviceName || details.serviceName,
+        customerName: b.customerName || details.customerName,
+        customerPhone: b.customerPhone || details.customerPhone,
+        totalPrice: b.totalPrice,
+        bookingDate: b.bookingDate,
+        startDate: b.startDate || details.startDate,
+        endDate: b.endDate || details.endDate,
+        spacesRequested: b.spacesRequested || details.spacesRequested || 1,
+        paymentMethod: b.paymentMethod || details.paymentMethod,
+        city: b.city || details.city,
+        address: b.address || details.address || b.fullAddress,
+        notes: b.notes || details.notes,
+        originAddress: origin?.address || null,
+        destinationAddress: destination?.address || null,
+        origin,
+        destination,
+        horseType: details.horseType,
+        numberOfHorses: details.numberOfHorses,
+        headCount: details.headCount,
+        birdCount: details.birdCount,
+        unitsRequested: details.unitsRequested,
+        species: details.species,
+        camelAgeGrade: details.camelAgeGrade,
+        camelTransportMode: details.camelTransportMode,
+        falconCarrierType: details.falconCarrierType,
+        createdAt: b.createdAt,
+        userId: b.userId,
+        status: b.status || 'pending',
+      };
+    });
 
   const orderLeads = [...store.orders.values()]
     .filter(
@@ -2035,7 +2702,27 @@ app.get('/crm/leads', auth, requireSessionUser, (req, res) => {
       status: o.status,
     }));
 
-  const leads = [...bookingLeads, ...orderLeads].sort((a, b) => {
+  const contactLeads = [...(store.contactLeads || new Map()).values()]
+    .filter(
+      (l) =>
+        String(l.sellerId || '') === userId &&
+        String(l.status || 'open') === 'open',
+    )
+    .map((l) => ({
+      id: l.id,
+      source: 'contact',
+      type: l.type,
+      serviceName: l.serviceName,
+      catalogItemId: l.catalogItemId,
+      channel: l.channel,
+      customerName: l.customerName || '',
+      customerPhone: l.customerPhone || '',
+      createdAt: l.createdAt,
+      userId: l.userId,
+      status: l.status || 'open',
+    }));
+
+  const leads = [...bookingLeads, ...orderLeads, ...contactLeads].sort((a, b) => {
     const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     return tb - ta;
