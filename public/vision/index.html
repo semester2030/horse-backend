@@ -317,6 +317,8 @@
     }
     .debate-panel { display: none; animation: rise .28s ease; }
     .debate-panel.active { display: block; }
+    .auction-panel { display: none; animation: rise .28s ease; }
+    .auction-panel.active { display: block; }
     .verdict {
       margin: 0 0 18px; padding: 18px 20px; border-radius: 18px;
       background: linear-gradient(135deg, rgba(47,107,69,.12), rgba(176,138,74,.1));
@@ -428,6 +430,7 @@
         <a href="#overview" class="active">الملخص</a>
         <a href="#delivered">ما نُفّذ</a>
         <a href="#ui-gaps">نواقص الواجهة</a>
+        <a href="#auction">المزاد</a>
         <a href="#strategy">رأينا</a>
         <a href="#slides">الشرائح</a>
         <a href="#phase1">المرحلة ١</a>
@@ -618,14 +621,13 @@
             <tr>
               <td><b>أيقونات Premium SVG</b></td>
               <td>
-                استبدال أيقونات Material الخام (مثل <code>Icons.map_outlined</code>)
-                بحزمة SVG/خط أيقونات موحّدة بهوية نوماس.
-                <br /><b>المقصود الأول:</b> أيقونات <b>الشريط السفلي</b> والقوائم —
-                <b>ليس</b> أزرار الإعجاب/التعليق بجانب الفيديو (تلك UX فيديو منفصلة).
-                توجد مكتبة <code>flutter_svg</code> لكن بدون حزمة أيقونات جاهزة بعد.
+                حزمة <code>NomasIcon</code> + SVG في <code>assets/icons/nomas/</code>
+                تُلوَّن من <code>AppColors</code> عبر الثيم.
+                <br /><b>مُنفَّذ للشريط السفلي</b> (خريطة/فيديو/خبراء/خدمات/ملف).
+                أزرار جانب الفيديو لم تُمس (حسب القرار).
               </td>
-              <td><span class="badge no">غير منفّذ</span></td>
-              <td><span class="score mid">تحسين هوية</span> — مفيد لكن غير حاجز إطلاق</td>
+              <td><span class="badge ok">شريط ✓</span></td>
+              <td><span class="score high">تم للشريط</span> — توسيع لاحقاً للقوائم</td>
             </tr>
             <tr>
               <td><b>Dark Mode منفصل</b></td>
@@ -675,6 +677,399 @@
           2) Dark Mode ليس أولوية للإطلاق الأول.
           3) إن أردت لمسة هوية واحدة فقط: حزمة أيقونات للشريط السفلي لاحقاً.
           4) ركّز الجهد على ملء محتوى الخبراء والمحتوى السوقي — هذا ما يراه النادي أولاً.
+        </div>
+      </div>
+    </section>
+
+    <section id="auction">
+      <div class="section-head">
+        <div>
+          <h2>نوماس مزاد — دراسة كاملة من البداية للنهاية</h2>
+          <p>
+            تحليل منتج + تشغيل + إدارة. اضغط التبويبات. مصدر الحقيقة اليوم في الكود:
+            «على السوم» = وضع تسعير في الإعلان فقط — <b>ليس مزاداً حياً</b>.
+          </p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="verdict">
+          <strong>القرار المعتمد لهذه الدراسة:</strong>
+          <b>مزاد واحد</b> اسمه «نوماس مزاد» مع فلتر نوع (خيل / إبل / صقر) — لا ثلاثة تطبيقات منفصلة.
+          القناة الأساسية: <b>داخل التطبيق</b> على نفس الـ API.
+          ويب اختياري لاحقاً للأدارة/الشاشات الكبيرة فقط — متصل بنفس الخلفية، ليس مزاداً منفصلاً.
+          شرط الإطلاق: دفع/عربون + تحقق بائع + إدارة غرفة المزاد. قبلها يبقى «على السوم» كوسم سعر فقط.
+        </div>
+
+        <div class="debate-tabs" id="auctionTabs">
+          <button type="button" class="active" data-auc="diff">١) السوم ≠ مزاد</button>
+          <button type="button" data-auc="journey">٢) الرحلة كاملة</button>
+          <button type="button" data-auc="onevs3">٣) واحد أم ثلاثة؟</button>
+          <button type="button" data-auc="channel">٤) تطبيق أم ويب؟</button>
+          <button type="button" data-auc="chat">٥) تواصل ومحادثات</button>
+          <button type="button" data-auc="admin">٦) إدارة وسلامة</button>
+          <button type="button" data-auc="place">٧) الموضع والتنفيذ</button>
+        </div>
+
+        <!-- 1 DIFF -->
+        <div class="auction-panel active" id="auc-diff">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">ما الموجود اليوم؟ وما الناقص؟</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>البند</th><th>على السوم (الحالي)</th><th>المزاد الحي (المطلوب)</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>التعريف</td>
+                <td>وسم تسعير على إعلان الخريطة: تفاوض خارج المنصة أو «السعر بالمفاوضة»</td>
+                <td>غرفة مزايدة موقوتة: مزايدات متعاقبة، فائز، تسوية</td>
+              </tr>
+              <tr>
+                <td>في الكود الآن</td>
+                <td><code>ListingPricingMode.auction</code> · واجهة «على السوم» في <code>add_horse_screen.dart</code></td>
+                <td>لا كيان Auction · لا bids · لا WebSocket · لا عربون</td>
+              </tr>
+              <tr>
+                <td>الالتزام</td>
+                <td>ضعيف — لا فائز تلقائي</td>
+                <td>قوي — قواعد قبول مزايدة + إغلاق + إعلان فائز</td>
+              </tr>
+              <tr>
+                <td>المخاطر</td>
+                <td>تواصل واتساب خارج الرقابة</td>
+                <td>احتيال/تلاعب سعر/عدم سداد → يحتاج escrow وإدارة</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout" style="margin-top:14px">
+            <b>قاعدة ذهبية:</b> لا تُسمِّ «على السوم» مزاداً في التسويق للأندية.
+            انقل المستخدم لاحقاً بزر: «ارفع هذا الإعلان إلى نوماس مزاد» بعد اكتمال البنية.
+          </div>
+        </div>
+
+        <!-- 2 JOURNEY -->
+        <div class="auction-panel" id="auc-journey">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">الرحلة من البداية للنهاية</h3>
+          <ol class="prio-list" id="auctionJourney">
+            <li class="open">
+              <div class="prio-num">A</div>
+              <div>
+                <b>تأهيل البائع</b>
+                <div class="more">
+                  حساب موثّق · هوية/سجل تجاري حسب الدور · قبول شروط المزاد ·
+                  ربط وسيلة دفع/استلام. بدون تأهيل = لا إنشاء غرفة.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">B</div>
+              <div>
+                <b>إنشاء المزاد (Draft → Review)</b>
+                <div class="more">
+                  اختيار أصل: إعلان موجود أو بطاقة مزاد مستقلة · النوع خيل/إبل/صقر ·
+                  صور/فيديو · سعر افتتاح · حد أدنى للزيادة · عربون مشاركة (اختياري/إلزامي حسب السياسة) ·
+                  وقت البداية/النهاية · مدينة/معاينة. الحالة: مسودة → بانتظار مراجعة إدارة.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">C</div>
+              <div>
+                <b>اعتماد الإدارة</b>
+                <div class="more">
+                  فحص المحتوى والوثائق · رفض/طلب تعديل · جدولة ظهور في التقويم.
+                  لا يظهر للمزايدة قبل <code>approved</code>.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">D</div>
+              <div>
+                <b>التسجيل كمزايد</b>
+                <div class="more">
+                  حساب مسجّل · قبول القواعد · دفع عربون إن لزم · حالة <code>registered</code>.
+                  بدون تسجيل لا تُقبل مزايدة (يمنع الحسابات الوهمية).
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">E</div>
+              <div>
+                <b>البث الحي / الغرفة</b>
+                <div class="more">
+                  عدّاد · أعلى مزايدة · اسم/رقم مزايد مجهّل جزئياً · زر «زايد» بخطوة ثابتة ·
+                  سجل مزايدات · تمديد تلقائي قصير عند مزايدة أخيرة (anti-snipe) ·
+                  إشعارات فورية للمشتركين.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">F</div>
+              <div>
+                <b>الإغلاق والفوز</b>
+                <div class="more">
+                  إعلان فائز · تجميد العربون · مهلة سداد الباقي · عند التعثر: نزول للاحتياطي أو إعادة طرح حسب السياسة.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">G</div>
+              <div>
+                <b>التسليم والتسوية</b>
+                <div class="more">
+                  تنسيق استلام/نقل عبر محادثة المزاد أو خدمة نقل نوماس · تأكيد الطرفين ·
+                  إطلاق مستحقات البائع − عمولة المنصة · تقييم بعد الصفقة.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">H</div>
+              <div>
+                <b>النزاعات والأرشيف</b>
+                <div class="more">
+                  تذكرة نزاع لإدارة · سجل مزايدات غير قابل للتلاعب · تقارير للبائع/المشتري.
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <!-- 3 ONE VS THREE -->
+        <div class="auction-panel" id="auc-onevs3">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">مزاد للإبل + للخيل + للصقور… أم واحد؟</h3>
+          <div class="two-col">
+            <div class="panel" style="padding:16px;box-shadow:none;border-color:rgba(47,107,69,.35)">
+              <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">✅ القرار: مزاد واحد بفلتر نوع</h4>
+              <p style="margin:0;color:var(--ink-soft);font-size:.92rem;line-height:1.75">
+                شاشة «نوماس مزاد» واحدة · تبويب/Chips: الكل | خيل | إبل | صقور ·
+                كل غرفة تحمل <code>species</code> ووسوم تميّز (منقيات/سباق…).
+              </p>
+              <ul style="margin:10px 0 0;padding-inline-start:18px;color:var(--ink-soft);line-height:1.75;font-size:.9rem">
+                <li>تكلفة بناء وتشغيل أقل بكثير</li>
+                <li>إدارة غرف ومدفوعات ونزاعات من لوحة واحدة</li>
+                <li>سيولة أفضل (جمهور يرى التقويم كاملاً)</li>
+                <li>هوية نوماس واحدة للأندية — ليست 3 منتجات مشتتة</li>
+                <li>يطابق الخريطة/الفيديو (نوع = فلتر لا تطبيق)</li>
+              </ul>
+            </div>
+            <div class="panel" style="padding:16px;box-shadow:none">
+              <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">❌ ثلاثة مزادات منفصلة — لماذا لا؟</h4>
+              <ul style="margin:0;padding-inline-start:18px;color:var(--ink-soft);line-height:1.75;font-size:.9rem">
+                <li>ثلاثة مسارات تسجيل ودفع وإشعارات</li>
+                <li>تجزئة الجمهور → غرف فارغة = ضرر سمعة</li>
+                <li>تعقيد App Store / دعم فني</li>
+                <li>نفس قواعد المزايدة تقريباً — لا مبرر منتج</li>
+              </ul>
+              <div class="callout" style="margin-top:12px">
+                <b>استثناء لاحق فقط:</b> إن طلب شريك مؤسسي (نادي إبل) «ليبل أبيض» بعلامة النادي —
+                يكون <i>علامة co-brand</i> فوق نفس المحرّك، لا كود مزاد ثالث.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 CHANNEL -->
+        <div class="auction-panel" id="auc-channel">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">ويب متصل بالتطبيق أم خدمة داخل التطبيق؟</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>الخيار</th><th>الإيجابيات</th><th>السلبيات</th><th>الحكم</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>Native داخل التطبيق أولاً</b></td>
+                <td>إشعارات دفع · جلسة موحدة · نفس تحقق البائع · تجربة غرفة سلسة على الجوال (جمهورك الأساسي)</td>
+                <td>شاشات كبيرة أقل راحة للبائع المحترف في البداية</td>
+                <td><span class="score high">الأفضل للإطلاق</span></td>
+              </tr>
+              <tr>
+                <td><b>ويب منفصل مستقل</b></td>
+                <td>سهل للعرض على لابتوب</td>
+                <td>حسابان · بيانات مزدوجة · مخاطر قانونية متضاربة · صيانة مضاعفة</td>
+                <td><span class="score low">مرفوض</span></td>
+              </tr>
+              <tr>
+                <td><b>ويب + تطبيق على نفس API</b></td>
+                <td>لوحة إدارة قوية · شاشات عرض مزاد في قاعة · بائعون محترفون</td>
+                <td>يحتاج تصميم responsive بعد استقرار الموبايل</td>
+                <td><span class="score mid">مرحلة ٢ تشغيلية</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="verdict" style="margin-top:14px">
+            <strong>التوصية:</strong>
+            ابنِ <b>محرّك المزاد في الباك‌اند + Flutter</b> أولاً.
+            أضف لاحقاً <b>واجهة ويب للوحة الإدارة وعرض الغرفة</b> تقرأ/تكتب نفس endpoints
+            (<code>/auctions</code> · <code>/bids</code>) — ليست «خدمة دايكرت» منفصلة بهوية دفع مختلفة.
+          </div>
+        </div>
+
+        <!-- 5 CHAT -->
+        <div class="auction-panel" id="auc-chat">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">التسجيل · التفاعل · المحادثات · التواصل</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>القناة</th><th>متى؟</th><th>القواعد</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>تسجيل المزايد</td>
+                <td>قبل أول مزايدة على غرفة</td>
+                <td>OTP موجود · قبول قواعد · عربون إن فُعّل · منع البائع من المزايدة على غرفته</td>
+              </tr>
+              <tr>
+                <td>المزايدة</td>
+                <td>أثناء <code>live</code></td>
+                <td>زيادة بحد أدنى · تأكيد زر · إشعار يُهزمك · لا سحب مزايدة بعد القبول</td>
+              </tr>
+              <tr>
+                <td>أسئلة عامة على الغرفة</td>
+                <td>قبل/أثناء العرض</td>
+                <td>دردشة عامة مراقبة · منع مشاركة جوال/رابط خارجي (فلتر) · المشرف يثبت إجابات البائع</td>
+              </tr>
+              <tr>
+                <td>محادثة ما بعد الفوز</td>
+                <td>بعد الإغلاق فقط بين فائز ↔ بائع (+ دعم)</td>
+                <td>قناة خاصة داخل التطبيق · لا تُفتح للعامة · أرشفة للنزاعات</td>
+              </tr>
+              <tr>
+                <td>واتساب/اتصال مباشر</td>
+                <td>اختياري بعد الفوز أو للمعاينة الميدانية</td>
+                <td>لا يُستبدل به سجل المزايدة؛ أي اتفاق سعر خارج الغرفة يُبطل الضمان</td>
+              </tr>
+              <tr>
+                <td>رأي خبير</td>
+                <td>قبل المزايدة على أصل مرتبط بإعلان</td>
+                <td>يربط ميزة الخبراء الحالية — ثقة أعلى دون بناء مستشار AI</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout" style="margin-top:14px">
+            المحادثة العامة ≠ شات حر. هي <b>قناة غرفة مقيدة</b>.
+            الشات الحر يُفتح بعد الترسية لحماية الخصوصية ومنع صفقات التفافية.
+          </div>
+        </div>
+
+        <!-- 6 ADMIN -->
+        <div class="auction-panel" id="auc-admin">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">كيف تدير الإدارة السلامة والمصداقية؟</h3>
+          <div class="dir-grid" style="grid-template-columns:1fr 1fr;margin-bottom:14px">
+            <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+              <h3>قبل الإطلاق</h3>
+              <p>مراجعة بطاقة المزاد · وثائق البائع · رفض المحتوى المضلل · جدولة زمنية · وضع علامات المخاطر.</p>
+            </article>
+            <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+              <h3>أثناء الغرفة</h3>
+              <p>إيقاف غرفة · حذف رسالة · حظر مزايد · تمديد/إلغاء لسبب مسجّل في Audit Log.</p>
+            </article>
+            <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+              <h3>المال</h3>
+              <p>عربون محجوز · عمولة منصة شفافة · عدم تحويل كامل للبائع قبل تأكيد استلام أو مهلة تعاقدية.</p>
+            </article>
+            <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+              <h3>بعد الصفقة</h3>
+              <p>نزاعات · تقييم · قائمة سوداء لمن ينسحب بعد الفوز بلا عذر · تصدير سجل للمراجعة القانونية.</p>
+            </article>
+          </div>
+          <table class="compare-table">
+            <thead>
+              <tr><th>ضمان المصداقية</th><th>الآلية</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>بائع موثوق</td><td>نفس مسار التحقق + شارة «مؤهل للمزاد»</td></tr>
+              <tr><td>شفافية السعر</td><td>سجل مزايدات مرتب زمنياً غير قابل للحذف من العميل</td></tr>
+              <tr><td>منع التلاعب</td><td>حد أقصى لحسابات بنفس الجهاز/هوية · كشف مزايدات شاذة</td></tr>
+              <tr><td>منع السنايبنج</td><td>تمديد +2 دقائق عند مزايدة في آخر لحظة</td></tr>
+              <tr><td>التدقيق</td><td>كل إجراء إداري في <code>auditEvents</code> (مثل الخبراء اليوم)</td></tr>
+              <tr><td>القانونية</td><td>شروط مزاد واضحة · إقرار أهلية · سياسة انسحاب</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 7 PLACE -->
+        <div class="auction-panel" id="auc-place">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">الموضع في نوماس + خطة التنفيذ</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>الموضع</th><th>الدور</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>مدخل رئيسي</b></td>
+                <td>بطاقة في الخدمات أو تبويب ثانوي «المزاد» داخل Video Hub / قائمة الخدمات — <b>ليس</b> استبدال الخريطة</td>
+              </tr>
+              <tr>
+                <td><b>من الإعلان</b></td>
+                <td>إن كان الإعلان مؤهلاً: «أدرج في المزاد» للبائع · «شاهد الغرفة» للمشتري</td>
+              </tr>
+              <tr>
+                <td><b>الخبراء</b></td>
+                <td>«اطلب رأي خبير» قبل المزايدة على نفس الأصل</td>
+              </tr>
+              <tr>
+                <td><b>الإشعارات</td></td>
+                <td>قبل البداية · هُزمت مزايدتك · إغلاق · استحقاق سداد (يحتاج Inbox لاحقاً)</td>
+              </tr>
+              <tr>
+                <td><b>الإدارة</b></td>
+                <td>صفحة Admin Auctions بجانب الخبراء/الإعلانات</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:18px">مراحل التنفيذ المقترحة</h4>
+          <ol class="prio-list" id="auctionRoad">
+            <li class="open">
+              <div class="prio-num">0</div>
+              <div>
+                <b>شرط مسبق: دفع حقيقي</b>
+                <div class="more">تفعيل بوابة (Moyasar/Tap) + webhooks — بدونه المزاد خطر قانوني/تشغيلي.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">1</div>
+              <div>
+                <b>موديل خلفي</b>
+                <div class="more">
+                  <code>auctions</code> · <code>auctionRegistrations</code> · <code>bids</code> · حالات:
+                  draft / pending_review / scheduled / live / ended / settled / cancelled
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">2</div>
+              <div>
+                <b>لوحة إدارة اعتماد الغرف</b>
+                <div class="more">مراجعة · جدولة · إيقاف طارئ · audit.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">3</div>
+              <div>
+                <b>Flutter: قائمة + غرفة + تسجيل</b>
+                <div class="more">Polling أولاً كل 1–2ث · ثم WebSocket إن لزم.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">4</div>
+              <div>
+                <b>عربون + تسوية + نزاعات</b>
+                <div class="more">قبل فتحه للجمهور العام — جرّب مع بائعين معتمدين محدودين (Pilot).</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">5</div>
+              <div>
+                <b>ويب عرض/إدارة على نفس API</b>
+                <div class="more">لقاعات الأندية والشاشات الكبيرة — بعد نجاح الموبايل.</div>
+              </div>
+            </li>
+          </ol>
+
+          <div class="callout" style="margin-top:14px">
+            <b>لا تبني المزاد قبل:</b> استقرار السوق · تحقق بائعين · دفع · على الأقل مسار نزاع واضح في الشروط.
+            أما «على السوم» فيبقى كما هو كوسم سعر دون ادّعاء مزاد حي.
+          </div>
         </div>
       </div>
     </section>
@@ -1441,15 +1836,15 @@
       },
       {
         id: "auction", phase: "p2", status: "partial", title: "المزادات الرقمية (على السوم ≠ مزاد حي)",
-        summary: "وضع تسعير «على السوم» في الإعلان فقط. لا مزايدة حية ولا غرفة مزاد.",
+        summary: "على السوم = تسعير إعلان فقط. دراسة المزاد الحي الكاملة في قسم #auction بالصفحة.",
         evidence: [
           "_ListingPriceMode.auction في add_horse_screen.dart",
           "ListingPricingMode.auction → «على السوم»",
-          "docs: نوماس مزاد خارج النطاق الحالي"
+          "vision/#auction — مزاد واحد + فلتر نوع · Native أولاً · إدارة/عربون"
         ],
-        place: "منشور منفصل «نوماس مزاد» + ربط من بطاقة الإعلان؛ ليس استبدال الخريطة.",
+        place: "مدخل نوماس مزاد (خدمات/Hub) + ربط من الإعلان — انظر تبويب الموضع في #auction.",
         why: "المزاد يحتاج escrow ووقت وإشعارات — طبقة فوق السوق لا داخله عشوائياً.",
-        how: "Auction entity · bids · WebSocket/polling · دفع عربون · إغلاق مجدول."
+        how: "ادفع أولاً → نموذج auctions/bids → إدارة اعتماد → غرفة Flutter → تسوية → ويب لاحقاً على نفس API."
       },
       {
         id: "individuals", phase: "p2", status: "partial", title: "قسم الفرديات",
@@ -1753,7 +2148,7 @@
         }
       });
     }, { rootMargin: "-40% 0px -50% 0px", threshold: 0.01 });
-    ["overview","delivered","ui-gaps","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
+    ["overview","delivered","ui-gaps","auction","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
       const el = document.getElementById(id);
       if (el) obs.observe(el);
     });
@@ -1766,6 +2161,25 @@
         btn.classList.add("active");
         const panel = document.getElementById("debate-" + btn.dataset.debate);
         if (panel) panel.classList.add("active");
+      });
+    });
+
+    // auction study tabs
+    document.querySelectorAll("#auctionTabs button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#auctionTabs button").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".auction-panel").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        const panel = document.getElementById("auc-" + btn.dataset.auc);
+        if (panel) panel.classList.add("active");
+      });
+    });
+    ["#auctionJourney", "#auctionRoad"].forEach(sel => {
+      document.querySelectorAll(sel + " li").forEach(li => {
+        li.addEventListener("click", () => {
+          document.querySelectorAll(sel + " li").forEach(x => x.classList.remove("open"));
+          li.classList.add("open");
+        });
       });
     });
 
