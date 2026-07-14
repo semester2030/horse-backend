@@ -317,8 +317,40 @@
     }
     .debate-panel { display: none; animation: rise .28s ease; }
     .debate-panel.active { display: block; }
-    .auction-panel { display: none; animation: rise .28s ease; }
-    .auction-panel.active { display: block; }
+    .auction-panel, .pay-panel { display: none; animation: rise .28s ease; }
+    .auction-panel.active, .pay-panel.active { display: block; }
+
+    /* أيقونات دراسات المنتج */
+    .study-hub {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 18px;
+    }
+    @media (max-width: 720px) { .study-hub { grid-template-columns: 1fr; } }
+    a.study-icon {
+      text-decoration: none; color: inherit;
+      display: block; padding: 20px 18px; border-radius: 20px;
+      background: linear-gradient(165deg, #fffdf8, var(--sand-2));
+      border: 1px solid var(--line); box-shadow: var(--shadow);
+      transition: .25s ease; position: relative; overflow: hidden;
+    }
+    a.study-icon:hover {
+      transform: translateY(-4px); border-color: var(--gold);
+    }
+    a.study-icon .study-mark {
+      width: 56px; height: 56px; border-radius: 16px;
+      display: grid; place-items: center; font-size: 28px;
+      background: linear-gradient(135deg, var(--gold-bright), var(--bronze));
+      color: #fff; margin-bottom: 12px;
+      box-shadow: 0 8px 20px rgba(139, 94, 43, 0.28);
+    }
+    a.study-icon h3 {
+      margin: 0 0 6px; font-family: Cairo, sans-serif; font-size: 1.15rem;
+    }
+    a.study-icon p {
+      margin: 0 0 12px; color: var(--ink-soft); font-size: .9rem; line-height: 1.7;
+    }
+    a.study-icon.pay .study-mark {
+      background: linear-gradient(135deg, #2f6b45, #b08a4a);
+    }
     .verdict {
       margin: 0 0 18px; padding: 18px 20px; border-radius: 18px;
       background: linear-gradient(135deg, rgba(47,107,69,.12), rgba(176,138,74,.1));
@@ -431,6 +463,7 @@
         <a href="#delivered">ما نُفّذ</a>
         <a href="#ui-gaps">نواقص الواجهة</a>
         <a href="#auction">المزاد</a>
+        <a href="#payments">الدفع</a>
         <a href="#strategy">رأينا</a>
         <a href="#slides">الشرائح</a>
         <a href="#phase1">المرحلة ١</a>
@@ -450,7 +483,23 @@
           وإعادة تسمية الخدمات، وهوية Desert Luxury.
           ما زال غير منفّذ من رؤية المرحلة ٢: <b>مستشارو الذكاء، المزادات الحية، التعليم، البطولات، KB</b>.
           راجع <a href="#strategy" style="color:var(--bronze);font-weight:800">رأينا</a> وبطاقات الأدلة أدناه.
+          دراسات عميقة: <a href="#payments" style="color:var(--bronze);font-weight:800">آلية الدفع</a>
+          و<a href="#auction" style="color:var(--bronze);font-weight:800">نوماس مزاد</a>.
         </p>
+        <div class="study-hub" aria-label="دراسات المنتج">
+          <a class="study-icon pay" href="#payments">
+            <div class="study-mark" aria-hidden="true">💳</div>
+            <h3>آلية الدفع الموحّدة</h3>
+            <p>ما نُفّذ · ما لم يُنفَّذ · الاحتياجات من البداية للنهاية · ربط كل ما يحتاج دفع داخل التطبيق.</p>
+            <span class="badge partial">PARTIAL · اضغط للتفاصيل</span>
+          </a>
+          <a class="study-icon" href="#auction">
+            <div class="study-mark" aria-hidden="true">🔨</div>
+            <h3>نوماس مزاد</h3>
+            <p>السوم ≠ مزاد حي · الرحلة · الموضع · شرط الدفع/العربون قبل الإطلاق.</p>
+            <span class="badge partial">PARTIAL · اضغط للتفاصيل</span>
+          </a>
+        </div>
         <div class="stats">
           <div class="stat"><b id="cOk">0</b><span>منفّذ بالكامل</span></div>
           <div class="stat"><b id="cPartial">0</b><span>جزئي / نواة فقط</span></div>
@@ -1069,6 +1118,469 @@
           <div class="callout" style="margin-top:14px">
             <b>لا تبني المزاد قبل:</b> استقرار السوق · تحقق بائعين · دفع · على الأقل مسار نزاع واضح في الشروط.
             أما «على السوم» فيبقى كما هو كوسم سعر دون ادّعاء مزاد حي.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== دراسة الدفع الموحّدة ========== -->
+    <section id="payments">
+      <div class="section-head">
+        <div>
+          <h2>آلية الدفع الموحّدة — دراسة كاملة من البداية للنهاية</h2>
+          <p>
+            مصدر واحد للحقيقة: محفظة/جلسة دفع واحدة داخل نوماس تغذي كل ما يحتاج مالاً
+            (متجر · حجوزات · لاحقاً عربون مزاد · رسوم فعاليات). اضغط التبويبات.
+          </p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="verdict">
+          <strong>القرار المعتمد لهذه الدراسة:</strong>
+          <b>بوابة دفع واحدة</b> (موصى: Moyasar أو Tap — ترخيص سعودي/خليجي + Apple Pay/Mada)
+          خلف <b>Payment Intent موحّد</b> في الباكند — ليست بوابة منفصلة لكل خدمة.
+          اليوم التشغيل = <b>نقد / تحويل عند الاستلام</b> مع أتمتة حالات ومخزون/سعة.
+          البطاقة <b>واجهة موجودة ومحاكاة فقط</b> ومقفلة بـ
+          <code>AppConfig.enableInAppCardPayments = false</code>
+          والسيرفر يرفض <code>paymentMethod=card</code> في checkout المتجر.
+          <b>لا تطلق مزاداً حياً ولا رسوم اشتراك قبل إكمال مسار Intent + Webhook.</b>
+        </div>
+
+        <div class="debate-tabs" id="paymentTabs">
+          <button type="button" class="active" data-pay="now">١) ماذا نُفّذ؟</button>
+          <button type="button" data-pay="gap">٢) ماذا لم نُنفّذ؟</button>
+          <button type="button" data-pay="needs">٣) الاحتياجات كاملة</button>
+          <button type="button" data-pay="place">٤) الموضع المناسب</button>
+          <button type="button" data-pay="wire">٥) ربط ما يحتاج دفع</button>
+          <button type="button" data-pay="flow">٦) الرحلة التقنية</button>
+          <button type="button" data-pay="road">٧) خارطة التنفيذ</button>
+        </div>
+
+        <!-- 1 DONE -->
+        <div class="pay-panel active" id="pay-now">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">ما هو منفّذ اليوم في الكود؟</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>البند</th><th>الحالة</th><th>الدليل / المسار</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>اختيار طريقة دفع (نقد / تحويل / بطاقة UI)</td>
+                <td><span class="badge ok">منفّذ (عرض)</span></td>
+                <td><code>service_payment_methods_widget.dart</code> · حجوزات إيواء/نقل/بيطرة · Checkout المتجر</td>
+              </tr>
+              <tr>
+                <td>تشغيل نقد/تحويل دون بوابة</td>
+                <td><span class="badge ok">منفّذ</span></td>
+                <td>إنشاء حجز <code>pending</code> أو طلب متجر <code>paid</code> مع <code>paymentMethod: cash</code></td>
+              </tr>
+              <tr>
+                <td>Checkout متجر متعدد البائعين + مخزون</td>
+                <td><span class="badge ok">منفّذ</span></td>
+                <td><code>POST /orders/checkout</code> · <code>marketplace_commerce.js</code> (خصم/استعادة/holds)</td>
+              </tr>
+              <tr>
+                <td>رفض بطاقة على سيرفر المتجر حالياً</td>
+                <td><span class="badge ok">حماية صحيحة</span></td>
+                <td><code>paymentMethod === 'card'</code> → 400 في checkout</td>
+              </tr>
+              <tr>
+                <td>شاشات بطاقة / معالجة / نجاح</td>
+                <td><span class="badge partial">UI فقط</span></td>
+                <td><code>features/payment/screens/*</code> · <code>PaymentService</code> يحاكي نجاحاً بعد ثانيتين</td>
+              </tr>
+              <tr>
+                <td>قفل المسارات في الملف الشخصي</td>
+                <td><span class="badge ok">منفّذ</span></td>
+                <td><code>enableInAppCardPayments</code> يخفي إدارة البطاقات حتى التفعيل</td>
+              </tr>
+              <tr>
+                <td>حقول <code>paymentMethod</code> على الحجوزات/CRM</td>
+                <td><span class="badge ok">منفّذ</span></td>
+                <td>تُحفظ وتُعرض في CRM ولوحة الطلبات — بلا تحقق بنك</td>
+              </tr>
+              <tr>
+                <td>آلات حالة طلبات المتجر + إشعارات أحداث</td>
+                <td><span class="badge ok">منفّذ</span></td>
+                <td>paid→preparing→shipped→delivered · رسائل <code>system</code></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout" style="margin-top:14px">
+            <b>خلاصة الصادق:</b> المنتج يبيع ويتشغّل اليوم بدون PSP.
+            ما يُسمّى «تم الدفع» لطلبات المتجر عند النقد = <b>حالة تشغيلية</b> لا تأكيد بنكي.
+          </div>
+        </div>
+
+        <!-- 2 GAPS -->
+        <div class="pay-panel" id="pay-gap">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">ماذا لم يُنفَّذ؟ (فجوات حرجة)</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>الفجوة</th><th>الأثر</th><th>ملاحظة</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>لا Payment Intent / لا جلسة دفع في الباكند</td>
+                <td>لا مبلغ محجوز ولا مرجع PSP</td>
+                <td>P0 قبل أي بطاقة حقيقية</td>
+              </tr>
+              <tr>
+                <td>لا Webhooks موقّعة من المزود</td>
+                <td>يمكن تزييف «نجاح» من العميل</td>
+                <td>P0 — مصدر الحقيقة = webhook فقط</td>
+              </tr>
+              <tr>
+                <td><code>PaymentService</code> محاكاة محلية</td>
+                <td>أي مسار يفتح البطاقة يدّعي اكتمالاً زائفاً</td>
+                <td>يُستبدل بـ SDK المزود + تأكيد سيرفر</td>
+              </tr>
+              <tr>
+                <td>لا حفظ بطاقات مرمّز (tokenized)</td>
+                <td>لا بطاقة محفوظة حقيقية</td>
+                <td>PCI: لا تخزين رقم كامل على خادمنا</td>
+              </tr>
+              <tr>
+                <td>لا تقسيم مستحقات (split / payout) للبائعين</td>
+                <td>متجر متعدد بائعين يحتاج تسوية يدوية</td>
+                <td>P1 بعد الإطلاق الأساسي</td>
+              </tr>
+              <tr>
+                <td>لا عربون مزاد / ضمان</td>
+                <td>يحجب إطلاق «نوماس مزاد» الحي</td>
+                <td>انظر <a href="#auction">#auction</a></td>
+              </tr>
+              <tr>
+                <td>لا فواتير/إشعارات ضريبية PDF</td>
+                <td>تشغيل B2B ضعيف</td>
+                <td>P2</td>
+              </tr>
+              <tr>
+                <td>لا مواءمة حجوزات الخدمات مع Intent</td>
+                <td>بطاقة في نموذج الحجز لا تؤكد الدفع</td>
+                <td>الحجز يُنشأ ثم «PaymentScreen» محاكاة</td>
+              </tr>
+              <tr>
+                <td>لا استرداد (refund) منظّم عبر API</td>
+                <td>إلغاء طلب يعيد المخزون فقط — لا يرجع مالاً من PSP</td>
+                <td>يُضاف مع أول بوابة</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 3 NEEDS FULL -->
+        <div class="pay-panel" id="pay-needs">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">الاحتياجات الكاملة — من البداية للنهاية</h3>
+          <p style="color:var(--ink-soft);line-height:1.8">
+            هذه قائمة منتجاتية/تقنية موحّدة. أي ميزة مال جديدة يجب أن تمر بهذا الأنبوب — لا بوابة ثانية.
+          </p>
+
+          <h4 style="font-family:Cairo,sans-serif">أ) منتج وتنظيم</h4>
+          <ol class="prio-list" id="payNeedsBiz">
+            <li>
+              <div class="prio-num">1</div>
+              <div>
+                <b>سياسات واضحة</b>
+                <div class="more">
+                  متى يُخصم؟ متى يُحتجز عربون؟ متى يُسترد؟ من يتحمّل رسوم PSP؟
+                  نصوص قانونية عربية + موافقة في أول دفع.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">2</div>
+              <div>
+                <b>حسابات تسوية</b>
+                <div class="more">
+                  نوماس (منصة) · بائع متجر · مزوّد خدمة · لاحقاً بائع مزاد.
+                  تحديد: قبض المنصة ثم تحويل، أو split لدى المزود.
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">3</div>
+              <div>
+                <b>اختيار مزود مرخّص</b>
+                <div class="more">
+                  معايير: مدى/أبل باي · ويب هوك موثوق · بيئة تجريبية · رسوم · دعم SAR.
+                  قرار واحد على مستوى الشركة — ليس لكل فريق فرعي.
+                </div>
+              </div>
+            </li>
+          </ol>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:18px">ب) نموذج بيانات موحّد (Backend)</h4>
+          <table class="compare-table">
+            <thead>
+              <tr><th>الكيان</th><th>الحقول الأساسية</th><th>الغرض</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>PaymentIntent</code></td>
+                <td>id · amount · currency=SAR · purpose · refType/refId · status · provider · providerRef · userId · sellerId? · metadata · createdAt</td>
+                <td>طلب دفع واحد لأي غرض</td>
+              </tr>
+              <tr>
+                <td><code>purpose</code></td>
+                <td><code>supplies_order</code> · <code>booking_deposit</code> · <code>booking_full</code> · <code>auction_deposit</code> · <code>event_fee</code> · <code>expert_tip</code>?</td>
+                <td>يربط المال بمنطق المنتج بدون تكرار PSP</td>
+              </tr>
+              <tr>
+                <td><code>status</code></td>
+                <td>created → requires_action → processing → succeeded | failed | cancelled → refunded/partial</td>
+                <td>آلة حالات مركزية</td>
+              </tr>
+              <tr>
+                <td><code>WebhookEvent</code></td>
+                <td>id · providerEventId · payload hash · processedAt</td>
+                <td>منع معالجة مزدوجة</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:18px">ج) API مطلوبة (امتداد — لا نسخة ثانية)</h4>
+          <ul style="line-height:1.9;color:var(--ink-soft)">
+            <li><code>POST /payments/intents</code> — إنشاء نية دفع مرتبطة بطلب/حجز/عربون</li>
+            <li><code>GET /payments/intents/:id</code> — حالة للعميل/المزوّد</li>
+            <li><code>POST /payments/webhooks/:provider</code> — بدون جلسة مستخدم · توقيع المزود</li>
+            <li><code>POST /payments/intents/:id/refund</code> — استرداد (أدمن/قواعد)</li>
+            <li>تعديل: checkout المتجر وحجز الخدمة يقبلان <code>intentId</code> بدل وسم <code>paid</code> مبكراً</li>
+          </ul>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:18px">د) تطبيق Flutter</h4>
+          <ul style="line-height:1.9;color:var(--ink-soft)">
+            <li>استبدال محاكاة <code>PaymentService</code> بعميل Intent + SDK المزود</li>
+            <li>شاشة دفع واحدة تُستدعى بوسيط: <code>PayRequest(purpose, amount, ref)</code></li>
+            <li>بعد النجاح: لا تثق بالـ Navigator result وحده — أعِد جلب Intent من السيرفر</li>
+            <li>تفعيل <code>enableInAppCardPayments</code> فقط بعد اكتمال ويب هوك على الإنتاج</li>
+          </ul>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:18px">هـ) تشغيل وأمن وامتثال</h4>
+          <ul style="line-height:1.9;color:var(--ink-soft)">
+            <li>أسرار المزود في Render secrets فقط · لا في المستودع</li>
+            <li>لا تخزين PAN/CVV — tokens فقط</li>
+            <li>سجل تدقيق لكل نجح/فشل/استرداد (admin audit موجود جزئياً)</li>
+            <li>بيئات: test keys → staging → live</li>
+            <li>حدود مبلغ + منع إعادة تشغيل webhook</li>
+          </ul>
+        </div>
+
+        <!-- 4 PLACE -->
+        <div class="pay-panel" id="pay-place">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">الموضع المناسب — أين يعيش الدفع في نوماس؟</h3>
+          <table class="compare-table">
+            <thead>
+              <tr><th>المكان</th><th>الدور</th><th>لماذا؟</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>طبقة منصة مشتركة</b><br /><code>features/payment/*</code> + <code>/payments/*</code></td>
+                <td>المحرك الوحيد</td>
+                <td>يمنع تكرار Moyasar داخل المتجر وآخر داخل الحجوزات وثالث للمزاد</td>
+              </tr>
+              <tr>
+                <td><b>ليست</b> تبويباً سفلياً</td>
+                <td>—</td>
+                <td>الدفع فعل لحظي داخل مسار شراء/حجز — ليس وجهة يومية</td>
+              </tr>
+              <tr>
+                <td>ملف شخصي → «طرق الدفع»</td>
+                <td>إدارة بطاقات مرمّزة (بعد التفعيل)</td>
+                <td>موجودة ومقفلة بالعلم؛ تُفتح عندما يكتمل Intent</td>
+              </tr>
+              <tr>
+                <td>نقاط الاستدعاء فقط</td>
+                <td>Checkout المتجر · نماذج الحجز · لاحقاً عربون مزاد · رسوم فعالية</td>
+                <td>كل نقطة تستدعي نفس <code>PaySheet</code> / مسار Intent</td>
+              </tr>
+              <tr>
+                <td>Admin / CRM</td>
+                <td>عرض حالة الدفع · استرداد · نزاع</td>
+                <td>لا معالجة بطاقة من لوحة الإدارة — فقط عمليات ما بعد الدفع</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout" style="margin-top:14px">
+            <b>قاعدة ذهبية:</b> المنتج يحدد <i>الغرض والمبلغ والمرجع</i>؛
+            طبقة الدفع تحدد <i>كيف يُقبض ويُؤكَّد</i>. لا تخلط الاثنين في شاشة خدمة واحدة.
+          </div>
+        </div>
+
+        <!-- 5 WIRING -->
+        <div class="pay-panel" id="pay-wire">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">كيف يُربط الدفع بكل ما يحتاجه داخل التطبيق؟</h3>
+          <p style="color:var(--ink-soft);line-height:1.8;margin-top:0">
+            الربط = <code>PaymentIntent.purpose + refId</code> ← عند <code>succeeded</code> يحدّث الكيان الهدف.
+            لا يمر المال مباشرة من واجهة الخدمة إلى البنك دون Intent.
+          </p>
+          <table class="compare-table">
+            <thead>
+              <tr><th>مسار المنتج</th><th>اليوم</th><th>بعد البوابة (الربط)</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>متجر الأدوات</b> (سلة → checkout)</td>
+                <td>نقد → طلبات <code>paid</code> + خصم مخزون فوري</td>
+                <td>
+                  إنشاء طلبات <code>pending_payment</code> أو Hold مخزون →
+                  Intent(<code>supplies_order</code>) → webhook →
+                  <code>paid</code> + تثبيت الخصم · فشل → إلغاء + تحرير hold
+                </td>
+              </tr>
+              <tr>
+                <td><b>إيواء / مرابط صقور</b></td>
+                <td>نقد/تحويل → حجز <code>pending</code> · بطاقة تفتح شاشة محاكاة</td>
+                <td>
+                  خياران منتج: (1) عربون Intent قبل التأكيد ·
+                  (2) دفع كامل بعد قبول المزوّد.
+                  السعة تبقى محجوزة بحالة الحجز كما اليوم
+                </td>
+              </tr>
+              <tr>
+                <td><b>نقل</b></td>
+                <td>مثل الإيواء — نقد تشغيلي</td>
+                <td>نفس Intent · <code>booking_*</code> · ربط <code>bookingId</code></td>
+              </tr>
+              <tr>
+                <td><b>بيطرة</b></td>
+                <td>موعد + نقد</td>
+                <td>غالباً دفع عند الزيارة أولاً؛ بطاقة اختيارية لنفس Intent</td>
+              </tr>
+              <tr>
+                <td><b>أعلاف / معدات</b></td>
+                <td>تواصل فقط + lead CRM</td>
+                <td>لا سلة؛ إن لزم دفع العربون لاحقاً = Intent مستقل على lead</td>
+              </tr>
+              <tr>
+                <td><b>نوماس مزاد (مستقبلي)</b></td>
+                <td>شرط مسبق: دفع</td>
+                <td>Intent(<code>auction_deposit</code>) إلزامي قبل المزايدة · تسوية لاحقة منفصلة</td>
+              </tr>
+              <tr>
+                <td><b>بطولات / رسوم (مستقبلي)</b></td>
+                <td>غير موجود</td>
+                <td>Intent(<code>event_fee</code>) عند التسجيل</td>
+              </tr>
+              <tr>
+                <td><b>خبراء</b></td>
+                <td>رأي مجاني حالياً</td>
+                <td>اختياري لاحقاً: bakshish/رسوم استشارة عبر نفس الطبقة — ليس محفظة ثالثة</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:16px">عقد الربط البرمجي (مختصر)</h4>
+          <pre style="direction:ltr;text-align:left;background:#1e1712;color:#f3ebe0;padding:14px 16px;border-radius:14px;overflow:auto;font-size:12px;line-height:1.65">// إنشاء
+POST /payments/intents
+{ purpose, amount, currency:"SAR", refType, refId, returnPath }
+
+// تأكيد (Webhook فقط)
+on provider.payment.paid →
+  mark intent succeeded
+  switch(purpose) {
+    supplies_order  → finalizeOrder(refId)
+    booking_deposit → confirmBooking(refId)
+    auction_deposit → unlockBidding(refId)
+  }
+
+// العميل بعد SDK
+refresh GET /payments/intents/:id  // لا تثق بنتيجة الواجهة وحدها</pre>
+        </div>
+
+        <!-- 6 FLOW -->
+        <div class="pay-panel" id="pay-flow">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">الرحلة التقنية من البداية للنهاية</h3>
+          <ol class="prio-list" id="payFlowList">
+            <li>
+              <div class="prio-num">1</div>
+              <div>
+                <b>المستخدم يصل لنقطة دفع</b>
+                <div class="more">سلة متجر / تأكيد حجز / عربون مزاد — يختار بطاقة أو أبل باي (بعد التفعيل) أو يبقى على النقد.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">2</div>
+              <div>
+                <b>التطبيق يطلب Intent من نوماس</b>
+                <div class="more">السيرفر يتحقق من السعر الحي، السعة/المخزون، هوية المستخدم، وينشئ Intent <code>created</code> مع مبلغ لا يتلاعب به العميل.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">3</div>
+              <div>
+                <b>فتح SDK المزود</b>
+                <div class="more">Client secret / publishable key فقط في التطبيق. 3-D Secure إن لزم.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">4</div>
+              <div>
+                <b>Webhook يصل للسيرفر</b>
+                <div class="more">التحقق من التوقيع → تحديث Intent → تنفيذ أثر المنتج (طلب/حجز/عربون) → إشعار <code>system</code>.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">5</div>
+              <div>
+                <b>التطبيق يعيد الجلب ويعرض النجاح</b>
+                <div class="more">شاشة النجاح الحالية تبقى، لكن بعد تأكيد Intent لا بعد تأخير وهمي.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">6</div>
+              <div>
+                <b>إلغاء / استرداد</b>
+                <div class="more">نفس قواعد الحالات الحالية + استدعاء refund لدى المزود عند الحاجة وإعادة مخزون/سعة كما الأتمتة الحالية.</div>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <!-- 7 ROADMAP -->
+        <div class="pay-panel" id="pay-road">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">خارطة التنفيذ المقترحة (بدون تكرار ملفات)</h3>
+          <ol class="prio-list" id="payRoadList">
+            <li>
+              <div class="prio-num">1</div>
+              <div>
+                <b>نواة Intent + Webhook في <code>backend/</code></b>
+                <div class="more">ملف مساعد واحد <code>payments_psp.js</code> (مثل <code>marketplace_commerce.js</code>) يُستدعى من checkout/الحجوزات — لا مسار موازٍ كامل.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">2</div>
+              <div>
+                <b>ربط المتجر أولاً (أعلى قيمة فورية)</b>
+                <div class="more">pending_payment → paid عبر webhook · الإبقاء على نقد كخيار.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">3</div>
+              <div>
+                <b>استبدال <code>PaymentService</code> في Flutter</b>
+                <div class="more">نفس الشاشات تقريباً · حذف المحاكاة · تفعيل العلم بحذر.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">4</div>
+              <div>
+                <b>حجوزات الخدمات (عربون أو كامل)</b>
+                <div class="more">بعد استقرار المتجر — نفس Intent.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">5</div>
+              <div>
+                <b>عربون المزاد ثم الرسوم الأخرى</b>
+                <div class="more">يفتح باب <a href="#auction">نوماس مزاد</a> بأمان.</div>
+              </div>
+            </li>
+          </ol>
+          <div class="callout" style="margin-top:14px">
+            <b>لا تفعل:</b> بوابة داخل كل feature · وسم <code>paid</code> من التطبيق قبل webhook ·
+            تخزين أرقام بطاقات · إطلاق مزاد/اشتراك قبل الخطوة ١–٣.
           </div>
         </div>
       </div>
@@ -1758,15 +2270,17 @@
       },
       {
         id: "payments", phase: "p1", status: "partial", title: "المدفوعات داخل التطبيق",
-        summary: "شاشات بطاقات موجودة لكن الدفع محاكى ومعطّل بعلم.",
+        summary: "نقد/تحويل تشغيلي + أتمتة متجر/حجوزات. البطاقة UI محاكى ومقفل. الدراسة الكاملة في vision/#payments.",
         evidence: [
+          "vision/#payments — دراسة موحّدة من البداية للنهاية",
           "AppConfig.enableInAppCardPayments = false",
           "payment/services/payment_service.dart (محاكاة)",
-          "payment/screens/*"
+          "POST /orders/checkout يرفض card · cash → paid تشغيلي",
+          "marketplace_commerce.js · حقول paymentMethod على الحجوزات"
         ],
-        place: "قبل تفعيل المزادات الحية والاشتراكات التعليمية.",
-        why: "أي مزاد/رسوم بطولة بلا بوابة دفع = مخاطرة منتج.",
-        how: "دمج Moyasar/Tap، ثم feature flag، ثم escrow للمزادات."
+        place: "طبقة منصة مشتركة (ليست تبويباً سفلياً) — تُستدعى من المتجر/الحجوزات/لاحقاً العربون.",
+        why: "مزاد ورسوم بلا Intent+Webhook = مخاطرة. نقد اليوم صحيح للتشغيل.",
+        how: "انظر تبويبات #payments: Intent موحّد → متجر أولاً → حجوزات → عربون مزاد."
       },
       {
         id: "taxonomy", phase: "p1", status: "ok", title: "تصنيفات السوق (ليست قواعد معرفة)",
@@ -2148,7 +2662,7 @@
         }
       });
     }, { rootMargin: "-40% 0px -50% 0px", threshold: 0.01 });
-    ["overview","delivered","ui-gaps","auction","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
+    ["overview","delivered","ui-gaps","auction","payments","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
       const el = document.getElementById(id);
       if (el) obs.observe(el);
     });
@@ -2174,7 +2688,17 @@
         if (panel) panel.classList.add("active");
       });
     });
-    ["#auctionJourney", "#auctionRoad"].forEach(sel => {
+    // payments study tabs
+    document.querySelectorAll("#paymentTabs button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#paymentTabs button").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".pay-panel").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        const panel = document.getElementById("pay-" + btn.dataset.pay);
+        if (panel) panel.classList.add("active");
+      });
+    });
+    ["#auctionJourney", "#auctionRoad", "#payNeedsBiz", "#payFlowList", "#payRoadList"].forEach(sel => {
       document.querySelectorAll(sel + " li").forEach(li => {
         li.addEventListener("click", () => {
           document.querySelectorAll(sel + " li").forEach(x => x.classList.remove("open"));
