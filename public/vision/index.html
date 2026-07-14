@@ -427,6 +427,7 @@
       <nav class="nav-links" id="topNav">
         <a href="#overview" class="active">الملخص</a>
         <a href="#delivered">ما نُفّذ</a>
+        <a href="#ui-gaps">نواقص الواجهة</a>
         <a href="#strategy">رأينا</a>
         <a href="#slides">الشرائح</a>
         <a href="#phase1">المرحلة ١</a>
@@ -549,9 +550,131 @@
           تبويب <b>الخبراء</b> بدل المفضلة · لوحة CRM للخبير · شارة <b>موثوق</b> عند الاعتماد ·
           وسوم تميّز مسبوقة بالنوع (<code>camel_*</code> / <code>horse_*</code> / <code>falcon_*</code>) ·
           شارات ثقة إدارية (موثّق/مميّز/نخبة) · تسميات الخدمات عبر <code>NomasServiceLabels</code>.
-          <br /><br />
-          <b>ما لم يُفعل بعد (متعمداً):</b>
-          أيقونات Premium SVG مخصصة · Dark Mode منفصل · مستشارو AI · مزاد حي · Home/+ /Inbox.
+        </div>
+      </div>
+    </section>
+
+    <section id="ui-gaps">
+      <div class="section-head">
+        <div>
+          <h2>نواقص واجهة Desert Luxury — شرح بند بند + هل لازم؟</h2>
+          <p>
+            هذا ليس نواقص المنتج (خبراء/CRM موجودة). هذا تلميع بصري من قائمة الهوية.
+            <b>رأي نوماس الآن:</b> لا تعبث بالفيديو إن كان مناسباً — لا يؤثر على جودة الستريم.
+          </p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="verdict">
+          <strong>خلاصة القرار المقترح للإطلاق:</strong>
+          اترك الفيديو و«الزجاج فوق الفيديو» وDark Mode مؤجّلين.
+          ركّز اختيارياً على <b>أيقونات الشريط السفلي فقط</b> إن أردت لمسة Premium سريعة —
+          بدون لمس مشغّل الفيديو أو Cloudflare.
+        </div>
+
+        <table class="compare-table" style="margin-top:16px">
+          <thead>
+            <tr>
+              <th>البند</th>
+              <th>المعنى بالضبط</th>
+              <th>الحالة</th>
+              <th>هل لازم الآن؟</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Theme + CommonCard</b></td>
+              <td>
+                الألوان والظلال والحدود تمر عبر <code>AppColors</code> /
+                <code>CommonCard</code> مركزياً. معظم الشاشات ترث المظهر.
+                بعض الشاشات ما زالت تكتب ألواناً/كروت يدوياً فلا تبدو «فاخرة» بنفس الدرجة.
+              </td>
+              <td><span class="badge partial">جزئي</span></td>
+              <td><span class="score mid">اختياري</span> — كافٍ للإطلاق؛ تلميع لاحقاً</td>
+            </tr>
+            <tr>
+              <td><b>فيديو immersive / التدرج الداكن</b></td>
+              <td>
+                <b>ليس تعديل على جودة الفيديو.</b>
+                طبقة واجهة خلف أو حول شاشة مركز الفيديو (Video Hub):
+                تدرج من بني داكن إلى أسود في خلفية الصفحة فقط
+                (<code>AppGradients.immersiveDark</code> في <code>video_hub_screen.dart</code>).
+                <br />ملف الـ HLS/MP4 وإعدادات Cloudflare <b>لا تتغير</b>.
+                لا ضغط إضافي ولا تشويش على الصورة.
+              </td>
+              <td><span class="badge partial">نواة موجودة</span></td>
+              <td><span class="score high">اتركه</span> — إن أعجبك الفيديو لا تلمسه</td>
+            </tr>
+            <tr>
+              <td><b>شريط سفلي مخصّص</b></td>
+              <td>
+                شريط تحت الخريطة (خريطة · فيديو · خبراء · خدمات · ملف).
+                أصلحنا Overflow (الخط الأحمر) وارتفاع SafeArea.
+                ما زال الشكل قريباً من Material (أيقونات النظام + مؤشر بسيط).
+              </td>
+              <td><span class="badge partial">جزئي</span></td>
+              <td><span class="score mid">اختياري</span> — ثابت تقنياً الآن</td>
+            </tr>
+            <tr>
+              <td><b>أيقونات Premium SVG</b></td>
+              <td>
+                استبدال أيقونات Material الخام (مثل <code>Icons.map_outlined</code>)
+                بحزمة SVG/خط أيقونات موحّدة بهوية نوماس.
+                <br /><b>المقصود الأول:</b> أيقونات <b>الشريط السفلي</b> والقوائم —
+                <b>ليس</b> أزرار الإعجاب/التعليق بجانب الفيديو (تلك UX فيديو منفصلة).
+                توجد مكتبة <code>flutter_svg</code> لكن بدون حزمة أيقونات جاهزة بعد.
+              </td>
+              <td><span class="badge no">غير منفّذ</span></td>
+              <td><span class="score mid">تحسين هوية</span> — مفيد لكن غير حاجز إطلاق</td>
+            </tr>
+            <tr>
+              <td><b>Dark Mode منفصل</b></td>
+              <td>
+                حالياً <code>darkTheme = lightTheme</code> في <code>app_theme.dart</code> —
+                لا توجد توكنات ليل حقيقية (خلفيات/نصوص/حدود لكل وضع).
+                الوضع الداكن الحقيقي يعني زوج ألوان كامل وليس قلب الشاشة للأسود فقط.
+              </td>
+              <td><span class="badge no">غير منفّذ</span></td>
+              <td><span class="score high">أجّله</span> — بعد الإطلاق أفضل</td>
+            </tr>
+            <tr>
+              <td><b>زجاج ناعم + إعادة رسم كنترول الفيديو</b></td>
+              <td>
+                طبقة شفافة/blur فوق الفيديو + تصميم أزرار تشغيل/تفاعل «أقل أندرويد خام».
+                هذا لمس لواجهة التحكّم فقط — أيضاً <b>لا يعيد ترميز الفيديو</b>.
+                لكنه يلمس شاشات التغذية وقد يربك ما تراه مناسباً الآن.
+              </td>
+              <td><span class="badge no">غير منفّذ</span></td>
+              <td><span class="score high">لا تعبث به الآن</span> — رأيك صحيح</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="two-col" style="margin-top:18px">
+          <div class="panel" style="padding:16px;box-shadow:none">
+            <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">ما المقصود بالتدرج؟ (قلق الجودة)</h4>
+            <p style="margin:0;color:var(--ink-soft);font-size:.92rem;line-height:1.8">
+              التدرج = لون خلف واجهة التطبيق حول قائمة أنواع الفيديو / خلفية Hub.
+              مثل خلفية شاشة خلف المصعد — لا يلمس «جودة المقطع» ولا bitrate.
+              إن غيّرنا التدرج أو تركناه: الفيديو نفسه بنفس الوضوح.
+            </p>
+          </div>
+          <div class="panel" style="padding:16px;box-shadow:none">
+            <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">الأيقونات: أي جانب؟</h4>
+            <p style="margin:0;color:var(--ink-soft);font-size:.92rem;line-height:1.8">
+              «Premium icons» في وثيقة الهوية = أيقونات النظام والتنقل (شريط سفلي، قوائم، تبويبات).
+              أزرار جانب الفيديو (إعجاب/مفضلة/مشاركة) بند منفصل اسمه إعادة رسم التحكم —
+              وهذا ما ننصح بتأجيله معك.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout" style="margin-top:16px">
+          <b>رأي المنتج الآن:</b>
+          1) لا تلمس الفيديو/الزجاج/التحكم إن كنت راضياً.
+          2) Dark Mode ليس أولوية للإطلاق الأول.
+          3) إن أردت لمسة هوية واحدة فقط: حزمة أيقونات للشريط السفلي لاحقاً.
+          4) ركّز الجهد على ملء محتوى الخبراء والمحتوى السوقي — هذا ما يراه النادي أولاً.
         </div>
       </div>
     </section>
@@ -1630,7 +1753,7 @@
         }
       });
     }, { rootMargin: "-40% 0px -50% 0px", threshold: 0.01 });
-    ["overview","delivered","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
+    ["overview","delivered","ui-gaps","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
       const el = document.getElementById(id);
       if (el) obs.observe(el);
     });
