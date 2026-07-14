@@ -1,0 +1,1682 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>نوماس — تدقيق الرؤية والمرحلة الثانية</title>
+  <meta name="description" content="تدقيق تفاعلي لما نُفّذ في نوماس وما تبقى من المرحلة الثانية والرؤية المستقبلية، بأدلة من الكود." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Cairo:wght@500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --sand: #f3ebe0;
+      --sand-2: #e8dccb;
+      --ink: #2a1b12;
+      --ink-soft: #5a4334;
+      --gold: #b08a4a;
+      --gold-bright: #d4a85a;
+      --bronze: #8b5e2b;
+      --ok: #2f6b45;
+      --ok-bg: #e5f2ea;
+      --partial: #9a6b1f;
+      --partial-bg: #f7efd8;
+      --no: #8a3a2a;
+      --no-bg: #f6e6e2;
+      --card: rgba(255, 252, 247, 0.92);
+      --line: rgba(42, 27, 18, 0.12);
+      --shadow: 0 18px 50px rgba(42, 27, 18, 0.12);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans Arabic", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 100% -10%, rgba(176, 138, 74, 0.18), transparent 60%),
+        radial-gradient(900px 500px at -10% 20%, rgba(139, 94, 43, 0.12), transparent 55%),
+        linear-gradient(180deg, #f7f1e8 0%, var(--sand) 40%, #efe4d4 100%);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .noise {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      z-index: 0;
+    }
+
+    .wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 24px 18px 80px; }
+
+    /* Nav */
+    .topbar {
+      position: sticky; top: 12px; z-index: 50;
+      display: flex; gap: 10px; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-radius: 999px;
+      background: rgba(255,252,247,0.82); backdrop-filter: blur(14px);
+      border: 1px solid var(--line); box-shadow: var(--shadow);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: Cairo, sans-serif; font-weight: 800; }
+    .brand-mark {
+      width: 38px; height: 38px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--gold-bright), var(--bronze));
+      display: grid; place-items: center; color: #fff; font-size: 14px;
+    }
+    .nav-links { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav-links a {
+      text-decoration: none; color: var(--ink-soft); font-size: 13px; font-weight: 600;
+      padding: 8px 12px; border-radius: 999px; transition: .2s ease;
+    }
+    .nav-links a:hover, .nav-links a.active { background: var(--ink); color: #fff; }
+
+    /* Hero */
+    .hero {
+      margin-top: 28px;
+      display: grid; grid-template-columns: 1.4fr 1fr; gap: 22px;
+      align-items: stretch;
+    }
+    @media (max-width: 900px) { .hero { grid-template-columns: 1fr; } }
+
+    .hero-card, .panel {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 28px;
+    }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-radius: 999px; background: rgba(176,138,74,.12);
+      color: var(--bronze); font-size: 12px; font-weight: 700; letter-spacing: .02em;
+    }
+    h1 {
+      font-family: Cairo, sans-serif; font-size: clamp(1.7rem, 3.5vw, 2.6rem);
+      line-height: 1.25; margin: 14px 0 10px;
+    }
+    .lede { color: var(--ink-soft); font-size: 1.05rem; line-height: 1.8; margin: 0 0 18px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+    .stat {
+      text-align: center; padding: 14px 10px; border-radius: 16px;
+      background: linear-gradient(180deg, #fff, var(--sand-2));
+      border: 1px solid var(--line);
+    }
+    .stat b { display: block; font-family: Cairo, sans-serif; font-size: 1.6rem; }
+    .stat span { font-size: 12px; color: var(--ink-soft); }
+
+    .rings { display: grid; gap: 18px; place-content: center; }
+    .ring-row { display: flex; align-items: center; gap: 16px; }
+    .ring {
+      --p: 0; width: 92px; height: 92px; border-radius: 50%;
+      background: conic-gradient(var(--gold) calc(var(--p) * 1%), rgba(42,27,18,.08) 0);
+      display: grid; place-items: center; position: relative;
+    }
+    .ring::before {
+      content: ""; position: absolute; inset: 10px; border-radius: 50%;
+      background: #fffaf3;
+    }
+    .ring strong { position: relative; font-family: Cairo, sans-serif; font-size: 1.15rem; }
+    .ring-meta small { color: var(--ink-soft); display: block; margin-top: 4px; }
+
+    /* Controls */
+    .controls {
+      margin: 26px 0 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    }
+    .chip, .btn {
+      border: 1px solid var(--line); background: #fffaf3; color: var(--ink);
+      border-radius: 999px; padding: 10px 16px; font: inherit; font-weight: 600;
+      cursor: pointer; transition: .2s ease;
+    }
+    .chip:hover, .btn:hover { transform: translateY(-1px); border-color: var(--gold); }
+    .chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .search {
+      flex: 1; min-width: 220px; border: 1px solid var(--line); border-radius: 999px;
+      padding: 12px 16px; font: inherit; background: #fffaf3; outline: none;
+    }
+    .search:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(176,138,74,.18); }
+
+    /* Sections */
+    section { margin-top: 42px; }
+    .section-head {
+      display: flex; justify-content: space-between; align-items: end; gap: 16px;
+      margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .section-head h2 {
+      font-family: Cairo, sans-serif; margin: 0; font-size: 1.55rem;
+    }
+    .section-head p { margin: 6px 0 0; color: var(--ink-soft); max-width: 620px; }
+
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+    .card {
+      grid-column: span 4; background: var(--card); border: 1px solid var(--line);
+      border-radius: 20px; padding: 18px; box-shadow: 0 10px 28px rgba(42,27,18,.06);
+      transition: .25s ease; cursor: pointer; position: relative; overflow: hidden;
+    }
+    @media (max-width: 1000px) { .card { grid-column: span 6; } }
+    @media (max-width: 640px) { .card { grid-column: span 12; } }
+    .card:hover { transform: translateY(-4px); border-color: rgba(176,138,74,.45); box-shadow: var(--shadow); }
+    .card.open { border-color: var(--gold); }
+    .card.hidden { display: none; }
+    .card-top { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+    .card h3 { margin: 0; font-size: 1.05rem; font-family: Cairo, sans-serif; }
+    .badge {
+      flex-shrink: 0; font-size: 11px; font-weight: 800; padding: 6px 10px;
+      border-radius: 999px; letter-spacing: .02em;
+    }
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.partial { background: var(--partial-bg); color: var(--partial); }
+    .badge.no { background: var(--no-bg); color: var(--no); }
+    .card .summary { color: var(--ink-soft); font-size: 0.92rem; line-height: 1.7; margin: 10px 0 0; }
+    .meta-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .pill {
+      font-size: 11px; padding: 5px 9px; border-radius: 999px;
+      background: rgba(42,27,18,.06); color: var(--ink-soft); font-weight: 600;
+    }
+    .details {
+      display: none; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line);
+      animation: rise .28s ease;
+    }
+    .card.open .details { display: block; }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .details h4 { margin: 0 0 8px; font-size: .92rem; }
+    .evidence {
+      background: #1f160f; color: #f4e8d4; border-radius: 14px; padding: 12px 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+      line-height: 1.65; overflow-x: auto; direction: ltr; text-align: left;
+    }
+    .details ul { margin: 8px 0 0; padding-inline-start: 18px; color: var(--ink-soft); line-height: 1.75; font-size: .92rem; }
+    .why {
+      margin-top: 10px; padding: 12px; border-radius: 14px;
+      background: linear-gradient(135deg, rgba(176,138,74,.12), rgba(139,94,43,.06));
+      border: 1px solid rgba(176,138,74,.2); font-size: .9rem; line-height: 1.7;
+    }
+
+    /* Slides */
+    .slides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 800px) { .slides { grid-template-columns: 1fr; } }
+    .slide {
+      border-radius: 20px; overflow: hidden; border: 1px solid var(--line);
+      background: #fff; cursor: zoom-in; position: relative; box-shadow: var(--shadow);
+    }
+    .slide img { width: 100%; display: block; transition: .35s ease; }
+    .slide:hover img { transform: scale(1.03); }
+    .slide figcaption {
+      padding: 12px 14px; font-size: .9rem; color: var(--ink-soft);
+      background: #fffaf3; border-top: 1px solid var(--line);
+    }
+
+    /* Architecture map */
+    .arch {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    }
+    @media (max-width: 900px) { .arch { grid-template-columns: 1fr; } }
+    .pillar {
+      border-radius: 20px; padding: 18px; border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fffefb, #f3e8d8);
+      min-height: 220px; transition: .25s ease; cursor: pointer;
+    }
+    .pillar:hover, .pillar.active {
+      transform: translateY(-3px); border-color: var(--gold); box-shadow: var(--shadow);
+    }
+    .pillar h3 { margin: 0 0 8px; font-family: Cairo, sans-serif; }
+    .pillar .icon { font-size: 28px; margin-bottom: 8px; }
+    .pillar ul { margin: 10px 0 0; padding-inline-start: 18px; color: var(--ink-soft); font-size: .9rem; line-height: 1.7; }
+
+    /* Nav compare */
+    .nav-compare {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    }
+    @media (max-width: 800px) { .nav-compare { grid-template-columns: 1fr; } }
+    .phone {
+      border-radius: 28px; border: 2px solid var(--ink); padding: 14px;
+      background: #1a120c; color: #f6ecdf; box-shadow: var(--shadow);
+    }
+    .phone h4 { margin: 0 0 12px; text-align: center; font-family: Cairo, sans-serif; }
+    .tabs {
+      display: flex; justify-content: space-between; gap: 4px;
+      background: #2a1d14; border-radius: 18px; padding: 10px 8px;
+    }
+    .tab {
+      flex: 1; text-align: center; font-size: 11px; opacity: .75; padding: 6px 2px;
+      border-radius: 12px;
+    }
+    .tab.on { background: var(--gold); color: #1a120c; opacity: 1; font-weight: 800; }
+    .tab .plus {
+      width: 34px; height: 34px; margin: 0 auto 4px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--gold-bright); color: #1a120c; font-weight: 900;
+    }
+
+    /* Roadmap */
+    .timeline { position: relative; padding-inline-start: 18px; }
+    .timeline::before {
+      content: ""; position: absolute; top: 8px; bottom: 8px; right: 0;
+      width: 3px; background: linear-gradient(var(--gold), transparent);
+      border-radius: 999px;
+    }
+    .step {
+      position: relative; margin: 0 18px 14px 0; padding: 16px 18px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+      cursor: pointer; transition: .2s ease;
+    }
+    .step::before {
+      content: ""; position: absolute; right: -29px; top: 22px;
+      width: 12px; height: 12px; border-radius: 50%; background: var(--gold);
+      box-shadow: 0 0 0 4px rgba(176,138,74,.2);
+    }
+    .step:hover, .step.open { border-color: var(--gold); }
+    .step .body { display: none; margin-top: 10px; color: var(--ink-soft); line-height: 1.75; font-size: .93rem; }
+    .step.open .body { display: block; }
+
+    /* Legend */
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(120%);
+      background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 999px;
+      z-index: 80; transition: .35s ease; font-size: .9rem; white-space: nowrap;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Lightbox */
+    .lightbox {
+      position: fixed; inset: 0; background: rgba(20,12,8,.88); z-index: 100;
+      display: none; place-items: center; padding: 20px;
+    }
+    .lightbox.show { display: grid; }
+    .lightbox img { max-width: min(1100px, 96vw); max-height: 88vh; border-radius: 12px; }
+    .lightbox button {
+      position: absolute; top: 18px; left: 18px; border: 0; border-radius: 999px;
+      padding: 10px 16px; background: #fff; cursor: pointer; font: inherit; font-weight: 700;
+    }
+
+    footer {
+      margin-top: 50px; text-align: center; color: var(--ink-soft); font-size: .85rem;
+      line-height: 1.8;
+    }
+    .progress-bar {
+      height: 8px; border-radius: 999px; background: rgba(42,27,18,.08); overflow: hidden; margin-top: 8px;
+    }
+    .progress-bar > i {
+      display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--bronze), var(--gold-bright));
+      transition: width 1s ease;
+    }
+
+    /* Strategy / debate */
+    .debate-tabs {
+      display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 18px;
+    }
+    .debate-tabs button {
+      border: 1px solid var(--line); background: #fffaf3; color: var(--ink);
+      border-radius: 999px; padding: 10px 14px; font: inherit; font-weight: 700;
+      cursor: pointer; transition: .2s ease;
+    }
+    .debate-tabs button.active {
+      background: var(--ink); color: #fff; border-color: var(--ink);
+    }
+    .debate-panel { display: none; animation: rise .28s ease; }
+    .debate-panel.active { display: block; }
+    .verdict {
+      margin: 0 0 18px; padding: 18px 20px; border-radius: 18px;
+      background: linear-gradient(135deg, rgba(47,107,69,.12), rgba(176,138,74,.1));
+      border: 1px solid rgba(47,107,69,.25);
+      line-height: 1.8; font-size: .98rem;
+    }
+    .verdict strong { color: var(--ok); }
+    .dir-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    }
+    @media (max-width: 1000px) { .dir-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .dir-grid { grid-template-columns: 1fr; } }
+    .dir-card {
+      border-radius: 18px; padding: 16px; border: 1px solid var(--line);
+      cursor: pointer; transition: .25s ease; min-height: 210px;
+      position: relative; overflow: hidden;
+    }
+    .dir-card:hover, .dir-card.picked {
+      transform: translateY(-3px); box-shadow: var(--shadow);
+      border-color: var(--gold);
+    }
+    .dir-card .swatches { display: flex; gap: 6px; margin: 10px 0 12px; flex-wrap: wrap; }
+    .dir-card .swatch {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.7); box-shadow: 0 2px 6px rgba(0,0,0,.2);
+    }
+    .dir-card h3 { margin: 0; font-family: Cairo, sans-serif; font-size: 1.05rem; }
+    .dir-card p { margin: 8px 0 0; font-size: .86rem; line-height: 1.65; opacity: .92; }
+    .dir-card .rank {
+      position: absolute; top: 12px; left: 12px;
+      font-size: 11px; font-weight: 800; padding: 4px 8px; border-radius: 999px;
+      background: rgba(0,0,0,.35); color: #fff;
+    }
+    .dir-a { background: linear-gradient(160deg, #1a120c, #3d2a1c); color: #f6ecdf; }
+    .dir-b { background: linear-gradient(160deg, #0f1412, #1a3a2f); color: #e8f0e8; }
+    .dir-c { background: linear-gradient(160deg, #111111, #2a2a2a); color: #f2e6d8; }
+    .dir-d { background: linear-gradient(160deg, #f7f1e8, #e8dccb); color: #2a1b12; }
+    .compare-table {
+      width: 100%; border-collapse: collapse; font-size: .9rem;
+      background: #fffaf3; border-radius: 16px; overflow: hidden;
+      border: 1px solid var(--line);
+    }
+    .compare-table th, .compare-table td {
+      padding: 12px 14px; text-align: right; border-bottom: 1px solid var(--line);
+      vertical-align: top; line-height: 1.65;
+    }
+    .compare-table th { background: #1f160f; color: #f4e8d4; font-weight: 700; }
+    .compare-table tr:last-child td { border-bottom: 0; }
+    .compare-table tr:hover td { background: rgba(176,138,74,.08); }
+    .score {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 42px; height: 28px; border-radius: 999px;
+      font-weight: 800; font-size: 12px;
+    }
+    .score.high { background: var(--ok-bg); color: var(--ok); }
+    .score.mid { background: var(--partial-bg); color: var(--partial); }
+    .score.low { background: var(--no-bg); color: var(--no); }
+    .prio-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .prio-list li {
+      display: grid; grid-template-columns: 48px 1fr; gap: 12px; align-items: start;
+      padding: 14px 16px; border-radius: 16px; background: var(--card);
+      border: 1px solid var(--line); cursor: pointer; transition: .2s ease;
+    }
+    .prio-list li:hover { border-color: var(--gold); }
+    .prio-list li.open { border-color: var(--gold); box-shadow: var(--shadow); }
+    .prio-num {
+      width: 48px; height: 48px; border-radius: 14px;
+      background: linear-gradient(135deg, var(--gold-bright), var(--bronze));
+      color: #fff; display: grid; place-items: center;
+      font-family: Cairo, sans-serif; font-weight: 800; font-size: 1.1rem;
+    }
+    .prio-list .more { display: none; margin-top: 8px; color: var(--ink-soft); font-size: .9rem; line-height: 1.75; }
+    .prio-list li.open .more { display: block; }
+    .svc-map {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+    }
+    @media (max-width: 900px) { .svc-map { grid-template-columns: repeat(2, 1fr); } }
+    .svc-tile {
+      padding: 12px; border-radius: 14px; border: 1px solid var(--line);
+      background: #fff; font-size: .82rem; line-height: 1.5; min-height: 88px;
+      transition: .2s ease; cursor: default;
+    }
+    .svc-tile b { display: block; margin-bottom: 4px; font-size: .92rem; }
+    .svc-tile.now { border-color: rgba(47,107,69,.4); background: var(--ok-bg); }
+    .svc-tile.next { border-color: rgba(154,107,31,.4); background: var(--partial-bg); }
+    .svc-tile.later { background: #f3eee7; opacity: .92; }
+    .svc-tile.star { border-color: var(--gold); background: linear-gradient(180deg,#fff8ea,#f3e4c4); }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+    .callout {
+      padding: 14px 16px; border-radius: 14px; margin-top: 12px;
+      background: rgba(42,27,18,.05); border-right: 4px solid var(--gold);
+      font-size: .92rem; line-height: 1.75;
+    }
+  </style>
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">ن</div>
+        <div>
+          <div>نوماس · تدقيق الرؤية</div>
+          <small style="color:var(--ink-soft);font-weight:500">أدلة من الكود · تفاعلي</small>
+        </div>
+      </div>
+      <nav class="nav-links" id="topNav">
+        <a href="#overview" class="active">الملخص</a>
+        <a href="#delivered">ما نُفّذ</a>
+        <a href="#strategy">رأينا</a>
+        <a href="#slides">الشرائح</a>
+        <a href="#phase1">المرحلة ١</a>
+        <a href="#phase2">المرحلة ٢</a>
+        <a href="#placement">مواضع</a>
+        <a href="#roadmap">التنفيذ</a>
+      </nav>
+    </header>
+
+    <section class="hero" id="overview">
+      <div class="hero-card">
+        <span class="eyebrow">تدقيق منتج · ١٤ يوليو 2026 · محدّث بعد الدفع لـ Render</span>
+        <h1>من منصة بيع وشراء… إلى المرجع الذكي للموروث السعودي</h1>
+        <p class="lede">
+          قارنّا الشرائح مع الكود سطراً بسطر. <b>المرحلة الأولى (السوق)</b> مكتملة تقريباً وقد توسّعت:
+          <b>تبويب الخبراء + CRM + موثوق</b>، و<b>وسوم تميّز معزولة حسب النوع</b>، و<b>شارات ثقة إدارية</b>،
+          وإعادة تسمية الخدمات، وهوية Desert Luxury.
+          ما زال غير منفّذ من رؤية المرحلة ٢: <b>مستشارو الذكاء، المزادات الحية، التعليم، البطولات، KB</b>.
+          راجع <a href="#strategy" style="color:var(--bronze);font-weight:800">رأينا</a> وبطاقات الأدلة أدناه.
+        </p>
+        <div class="stats">
+          <div class="stat"><b id="cOk">0</b><span>منفّذ بالكامل</span></div>
+          <div class="stat"><b id="cPartial">0</b><span>جزئي / نواة فقط</span></div>
+          <div class="stat"><b id="cNo">0</b><span>غير منفّذ</span></div>
+        </div>
+        <div style="margin-top:16px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft)">
+            <span>اكتمال رؤية المرحلة الثانية (تقديري)</span>
+            <strong id="pctLabel">0%</strong>
+          </div>
+          <div class="progress-bar"><i id="pctBar"></i></div>
+        </div>
+      </div>
+      <div class="hero-card rings">
+        <div class="ring-row">
+          <div class="ring" id="ring1" style="--p:0"><strong id="ring1v">0%</strong></div>
+          <div class="ring-meta">
+            <b>المرحلة الأولى — السوق + شبكة الخبراء</b>
+            <small>خريطة · فيديو · OTP · خدمات · كتالوج · خبراء · وسوم</small>
+          </div>
+        </div>
+        <div class="ring-row">
+          <div class="ring" id="ring2" style="--p:0"><strong id="ring2v">0%</strong></div>
+          <div class="ring-meta">
+            <b>المرحلة الثانية — الذكاء والتوسع</b>
+            <small>مستشارون · مزادات حية · تعليم · بطولات · KB</small>
+          </div>
+        </div>
+        <div class="ring-row">
+          <div class="ring" id="ring3" style="--p:0"><strong id="ring3v">0%</strong></div>
+          <div class="ring-meta">
+            <b>تنقل الشريط السفلي</b>
+            <small>خريطة · فيديو · <b>خبراء</b> · خدمات · ملف — المفضلة داخل الملف</small>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="delivered">
+      <div class="section-head">
+        <div>
+          <h2>ما نُفّذ في الكود — Design System Desert Luxury</h2>
+          <p>تم تطبيقه مركزياً عبر التوكنات (بدون تعديل مئات الشاشات يدوياً).</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="verdict">
+          <strong>الحالة: مطبّق في Flutter · يوليو 2026</strong><br />
+          لوحة <b>Desert Luxury</b> أصبحت مصدر الألوان والثيم في التطبيق. الأسماء القديمة مثل
+          <code>ashBlondeMain</code> بقيت للتوافق، لكن قيمها = Bronze / Gold الفاخرة.
+        </div>
+
+        <div class="dir-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 16px;">
+          <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+            <h3>لوحة الألوان</h3>
+            <div class="swatches">
+              <span class="swatch" style="background:#F5F0E6" title="Ivory"></span>
+              <span class="swatch" style="background:#C4A574" title="Sand"></span>
+              <span class="swatch" style="background:#8B6914" title="Bronze"></span>
+              <span class="swatch" style="background:#3D2314" title="Dark Brown"></span>
+              <span class="swatch" style="background:#D4AF37" title="Gold"></span>
+              <span class="swatch" style="background:#0A0A0A" title="Black"></span>
+            </div>
+            <p>Ivory · Sand · Bronze · Dark Brown · Gold · Black</p>
+          </article>
+          <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+            <h3>ملفات معدَّلة</h3>
+            <p style="direction:ltr;text-align:left;font-family:ui-monospace,monospace;font-size:.78rem;line-height:1.7;opacity:1">
+              app/lib/core/theme/colors.dart<br />
+              app_theme.dart · gradients.dart<br />
+              shadows.dart · typography.dart<br />
+              spacing.dart · index.dart<br />
+              common_card.dart · common_button.dart
+            </p>
+          </article>
+          <article class="dir-card dir-a" style="cursor:default;min-height:auto">
+            <h3>لماذا بدون لمس كل شاشة؟</h3>
+            <p>~1975 استدعاء لـ AppColors في 151 ملفاً. غيّرنا المصدر → انعكس على الأزرار، الخلفيات، النصوص، ThemeData، الكروت المشتركة.</p>
+          </article>
+        </div>
+
+        <table class="compare-table">
+          <thead>
+            <tr><th>العنصر</th><th>قبل</th><th>بعد (Desert Luxury)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>خلفية التطبيق</td><td>أبيض #FFFFFF</td><td>Ivory #F5F0E6</td></tr>
+            <tr><td>اللون الأساسي (ashBlondeMain)</td><td>أشقر فاتح #B3753B</td><td>Bronze #8B6914</td></tr>
+            <tr><td>ثانوي / تمييز</td><td>أشقر أفتح</td><td>Gold #D4AF37 + Bronze light</td></tr>
+            <tr><td>النص الأساسي</td><td>رمادي غامق</td><td>Dark Brown #3D2314</td></tr>
+            <tr><td>الحدود</td><td>رمادي بارد</td><td>رمل دافئ #D9CBB5 + تركيز ذهبي</td></tr>
+            <tr><td>الكروت (Theme + CommonCard)</td><td>مسطحة غالباً</td><td>elevation + border فاخر</td></tr>
+            <tr><td>الظلال / التدرجات</td><td>بيج دافئ عام</td><td>ظلال بني/أسود + تدرج immersiv للفيديو</td></tr>
+            <tr><td>Deprecated aliases قديمة</td><td>موجودة بلا استخدام</td><td>أُزيلت لتنظيف التحليل</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout" style="margin-top:16px">
+          <b>موجة الإنجاز — ١٤ يوليو 2026 (مثبتة في الكود):</b>
+          تبويب <b>الخبراء</b> بدل المفضلة · لوحة CRM للخبير · شارة <b>موثوق</b> عند الاعتماد ·
+          وسوم تميّز مسبوقة بالنوع (<code>camel_*</code> / <code>horse_*</code> / <code>falcon_*</code>) ·
+          شارات ثقة إدارية (موثّق/مميّز/نخبة) · تسميات الخدمات عبر <code>NomasServiceLabels</code>.
+          <br /><br />
+          <b>ما لم يُفعل بعد (متعمداً):</b>
+          أيقونات Premium SVG مخصصة · Dark Mode منفصل · مستشارو AI · مزاد حي · Home/+ /Inbox.
+        </div>
+      </div>
+    </section>
+
+    <section id="strategy">
+      <div class="section-head">
+        <div>
+          <h2>رأينا الاستراتيجي في كل النقاشات</h2>
+          <p>
+            تفكيك عميق مبني على هيكل المشروع الحالي (خريطة · فيديو · خدمات · كتالوج) وتجربة المستخدم —
+            مع مقارنة صريحة وأولوية تنفيذ.
+          </p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="verdict">
+          <strong>الخلاصة المحدّثة (يوليو 2026):</strong>
+          هوية <b>Desert Luxury</b> مطبّقة · الوسوم حسب النوع مطبّقة (بدون أقسام رئيسية جديدة) ·
+          تسميات الخدمات (نقل ولوجستيات / صحة ورعاية / متجر…) مطبّقة ·
+          <b>الخبراء المعتمدون</b> ارتقوا لتبويب رئيسي + «اطلب رأي خبير» + CRM بعد الاعتماد + موثوق فوري —
+          وهذا ما كان مخططاً كخيار A+B معاً. المتبقي الاستراتيجي: KB ومستشارو الذكاء والمزادات الحية والبطولات.
+        </div>
+
+        <div class="debate-tabs" id="debateTabs">
+          <button type="button" class="active" data-debate="brand">١) الهوية البصرية</button>
+          <button type="button" data-debate="services">٢) هيكل الخدمات ١٠</button>
+          <button type="button" data-debate="experts">٣) الخبراء vs المستشارون</button>
+          <button type="button" data-debate="tags">٤) وسوم لا أقسام</button>
+          <button type="button" data-debate="rank">٥) جدول المقارنة والأولوية</button>
+        </div>
+
+        <!-- BRAND -->
+        <div class="debate-panel active" id="debate-brand">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">تشخيص الهوية — صحيح 100%</h3>
+          <p style="color:var(--ink-soft);line-height:1.8;margin-top:0">
+            المشكلة ليست UX ولا التنقل. المشكلة أن Design System الحالي (بيج فاتح + بني هادئ + أبيض غالب + Material icons + كروت مسطحة)
+            ينقل إحساس «متجر منزلي» لا «نادي موروث / مزاد / نخبة». اختبار الشعار المخفي: إذا أزلت اللوقو لن تقول «نوماس» —
+            وهذا دليل فشل هوية وليس فشل منتج.
+          </p>
+          <p style="color:var(--ink-soft);line-height:1.8">
+            قرار صحيح: <b>لا تعدّل مئات الشاشات الآن</b>. صمّم 4 اتجاهات بصرية كاملة (ألوان، خطوط، أزرار، كروت، أيقونات، خريطة، فيديو immersive، تبويبات، فاتح/داكن)
+            ثم اختر اتجاهاً واحداً وابنِ Design Tokens فوقه. هذا يوفر إعادة تصميم لاحقة ويحمي الهيكل الحالي.
+          </p>
+
+          <div class="dir-grid" id="dirGrid" style="margin-top:16px">
+            <article class="dir-card dir-a picked" data-dir="desert">
+              <span class="rank">الأفضل لنوماس</span>
+              <h3>Desert Luxury</h3>
+              <div class="swatches">
+                <span class="swatch" style="background:#F5F0E6"></span>
+                <span class="swatch" style="background:#C4A574"></span>
+                <span class="swatch" style="background:#8B6914"></span>
+                <span class="swatch" style="background:#3D2314"></span>
+                <span class="swatch" style="background:#D4AF37"></span>
+                <span class="swatch" style="background:#0A0A0A"></span>
+              </div>
+              <p>Ivory · Sand · Bronze · Dark Brown · Gold · Black. فاخر صحراوي — الأقرب للموروث السعودي والمزادات والفرسان.</p>
+            </article>
+            <article class="dir-card dir-b" data-dir="falcon">
+              <span class="rank">#2 قوة</span>
+              <h3>Falcon Luxury</h3>
+              <div class="swatches">
+                <span class="swatch" style="background:#1C1C1E"></span>
+                <span class="swatch" style="background:#0F3D2E"></span>
+                <span class="swatch" style="background:#D4AF37"></span>
+                <span class="swatch" style="background:#F5F0E6"></span>
+              </div>
+              <p>Charcoal · Dark Green · Gold · Ivory. قوة صقارة ممتازة — لكنه يميل لعمود الصقور أكثر من الإبل/الخيل.</p>
+            </article>
+            <article class="dir-card dir-c" data-dir="arabian">
+              <span class="rank">#3 قِلّة ألوان</span>
+              <h3>Arabian Premium</h3>
+              <div class="swatches">
+                <span class="swatch" style="background:#111"></span>
+                <span class="swatch" style="background:#F5F0E6"></span>
+                <span class="swatch" style="background:#9A3412"></span>
+                <span class="swatch" style="background:#C4A574"></span>
+              </div>
+              <p>Hermès / RR عقلية: ألوان قليلة جداً، تفاصيل، مساحات. فاخر عالمياً لكن يحتاج انضباطاً بصرياً قاسياً.</p>
+            </article>
+            <article class="dir-card dir-d" data-dir="current">
+              <span class="rank">الحالي — يُستبدل</span>
+              <h3>Beige Soft (اليوم)</h3>
+              <div class="swatches">
+                <span class="swatch" style="background:#F4F1EA"></span>
+                <span class="swatch" style="background:#C4A484"></span>
+                <span class="swatch" style="background:#FFFFFF"></span>
+                <span class="swatch" style="background:#8B7355"></span>
+              </div>
+              <p>لطيف وآمن — لكنه يشبه مطعم/أثاث. لا مزاد، لا فروسية، لا نخبة. يُحتفَظ منه فقط بدرجات رملية فاتحة كخلفيات ثانوية.</p>
+            </article>
+          </div>
+          <div class="callout" id="dirDetail">
+            <b>لماذا Desert Luxury أولاً؟</b>
+            يجمع الصحراء + الذهب + الأسود العميق دون أن يبدو «تطبيق ألعاب داكن» أو «منصة صقارة فقط».
+            يناسب الخريطة (نهار/غروب)، والفيديو (خلفيات غامرة داكنة مع ذهب)، والخدمات (كروت elev+border).
+            Falcon Luxury خيار ثانٍ قريب إذا قررتم dark-mode أولاً للهوية الكاملة.
+          </div>
+
+          <div class="two-col" style="margin-top:16px">
+            <div>
+              <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">ما يجب تغييره في النظام</h4>
+              <ul style="margin:0;color:var(--ink-soft);line-height:1.8;padding-inline-start:18px">
+                <li>لوحة ألوان كاملة + Dark/Light tokens</li>
+                <li>Typography فاخرة (ليس Inter/افتراضي)</li>
+                <li>أيقونات Premium (خط موحّد أو custom SVG) بدل Material الخام</li>
+                <li>Luxury Cards: border رفيع + elevation + shadow ناعم / glass في الفيديو</li>
+                <li>فيديو Immersive: خلفية متدرجة داكنة، تدرجات حافة، تحكم أقل «Android»</li>
+                <li>Bottom bar مخصص (ارتفاع، indicators، بدون إحساس Material خام)</li>
+              </ul>
+            </div>
+            <div>
+              <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">ما لا يُغيَّر</h4>
+              <ul style="margin:0;color:var(--ink-soft);line-height:1.8;padding-inline-start:18px">
+                <li>UX وFlows الحالية</li>
+                <li>الترتيب الوظيفي: خريطة / فيديو / خدمات</li>
+                <li>فكرة الأعمدة الثلاثة: صقور · خيل · إبل</li>
+                <li>نماذج البيانات والـ API الحالية</li>
+              </ul>
+              <div class="callout" style="margin-top:12px">
+                الحكم: أسبوعان Design Directions قبل لمس الشاشات = استثمار صحيح لـ App Store ومفاوضات الأندية.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SERVICES -->
+        <div class="debate-panel" id="debate-services">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">هيكل الخدمات العشرة — توسعة ذكية لا استبدال جذري</h3>
+          <p style="color:var(--ink-soft);line-height:1.8;margin-top:0">
+            اليوم في الكود: نقل · بيطرة · إسطبل/مربط · أعلاف · معدات/أدوات
+            (<code>services_home_screen.dart</code> + كتالوج marketplace).
+            مقترح الـ 10 أقسام صحيح كمظلة منتجات، لكن تنفيذه دفعة واحدة يفرغ المنصة ويُظهر فراغاً للأندية.
+          </p>
+
+          <h4 style="font-family:Cairo,sans-serif">خريطة التوسع (اضغط الفلتر أعلاه إن أردت العودة)</h4>
+          <div class="svc-map" style="margin:12px 0 16px">
+            <div class="svc-tile star"><b>١. الخبراء المعتمدون ⭐</b>عمود مستقل (ليس تحت خدمات عادية)</div>
+            <div class="svc-tile now"><b>٢. الصحة والرعاية</b>توسيع البيطرة → مختبرات/لقاحات لاحقاً</div>
+            <div class="svc-tile now"><b>٣. النقل واللوجستيات</b>توسيع النقل + بطولات/تأمين لاحقاً</div>
+            <div class="svc-tile now"><b>٤. الإيواء والتجهيز</b>إعادة تسمية إسطبل/مربط</div>
+            <div class="svc-tile now"><b>٥. التغذية / المتجر</b>أعلاف + مكملات تحت «المتجر»</div>
+            <div class="svc-tile next"><b>٦. التدريب</b>جديد — بعد الخبراء</div>
+            <div class="svc-tile now"><b>٧. المعدات والمتجر</b>دمج أدوات+معدات تحت متجر</div>
+            <div class="svc-tile next"><b>٨. الإعلام والتصوير</b>تمييز تنافسي قوي</div>
+            <div class="svc-tile next"><b>٩. البطولات والفعاليات</b>بعد شبكة خبراء/وسوم</div>
+            <div class="svc-tile later"><b>١٠. الخدمات الحكومية</b>آخر مرحلة — شراكات</div>
+          </div>
+
+          <table class="compare-table">
+            <thead>
+              <tr><th>التسمية القديمة</th><th>التسمية المقترحة</th><th>رأيي</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>أدوات</td><td><b>المتجر</b></td><td>موافق بقوة — يفتح أعلاف+أدوية+ملابس دون كسر IA</td></tr>
+              <tr><td>البيطرة</td><td><b>الصحة والرعاية</b></td><td>موافق — أوسع ومستقبلية دون شاشات جديدة فوراً</td></tr>
+              <tr><td>إسطبل</td><td><b>الإيواء والتجهيز</b></td><td>موافق — يغطي مربط/حظيرة/وكور</td></tr>
+              <tr><td>معدات ثقيلة (فيديو)</td><td>تبقى تحت متجر/خدمات نقل لا تسمية خلط</td><td>«معدات ثقيلة» جزء من اللوجستيات أو المتجر — لا تُسمَّى نقل</td></tr>
+            </tbody>
+          </table>
+
+          <div class="callout">
+            <b>أفضل ثلاث إضافات تنافسية — موافق:</b>
+            1) الخبراء المعتمدون · 2) الإعلام والتصوير · 3) البطولات والفعاليات.
+            لكن الترتيب التنفيدي: خبراء مربوطون بالإعلان أولاً، ثم بطولات، ثم إعلام (لأن الإعلام يحتاج شبكة موردين أقل توافراً في البداية).
+          </div>
+        </div>
+
+        <!-- EXPERTS -->
+        <div class="debate-panel" id="debate-experts">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">الخبراء المعتمدون — عمود هوية، لا «مستشار جانبي»</h3>
+          <p style="color:var(--ink-soft);line-height:1.8;margin-top:0">
+            إذا كان الاتجاه عرض نوماس على نادي الإبل/الصقور وجهات الخيل: التسمية الصحيحة هي
+            <b>«الخبراء المعتمدون»</b> أو <b>«خبراء نوماس»</b> — أقوى مؤسسياً من «مستشار AI» وحده.
+            AI يمكن أن يكون لاحقاً مساعدة داخل ملف الخبير، لا بديلاً عن شبكة بشرية معتمدة.
+          </p>
+
+          <div class="two-col">
+            <div class="panel" style="padding:16px;box-shadow:none">
+              <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">خيار A — تبويب رئيسي ⭐</h4>
+              <p style="margin:0;color:var(--ink-soft);font-size:.9rem;line-height:1.75">
+                خريطة · فيديو · <b>الخبراء</b> · خدمات · ملف
+                (يستبدل المفضلة في الشريط)
+              </p>
+              <p style="margin:10px 0 0;font-size:.9rem;line-height:1.75">
+                <span class="score high">UX هوية</span>
+                <span class="score mid">تكلفة بناء</span>
+                <span class="score mid">مخاطرة</span>
+              </p>
+              <div class="callout">ممتاز للإشارة المؤسسية. يحتاج محتوى خبراء حقيقي وإلا يظهر فارغاً أمام الأندية.</div>
+            </div>
+            <div class="panel" style="padding:16px;box-shadow:none">
+              <h4 style="margin:0 0 8px;font-family:Cairo,sans-serif">خيار B — بطاقة أولى داخل الخدمات + ربط إعلان</h4>
+              <p style="margin:0;color:var(--ink-soft);font-size:.9rem;line-height:1.75">
+                بدون تغيير الشريط فوراً · «اطلب رأي خبير» على كل إعلان/فيديو · توصيات حسب النوع
+              </p>
+              <p style="margin:10px 0 0;font-size:.9rem;line-height:1.75">
+                <span class="score high">سرعة</span>
+                <span class="score high">ربط رحلة</span>
+                <span class="score mid">بروز هوية</span>
+              </p>
+              <div class="callout">الأفضل كمرحلة دخول: يثبت القيمة قبل إعلان التبويب.</div>
+            </div>
+          </div>
+
+          <div class="verdict" style="margin-top:16px">
+            <strong>حالة التنفيذ الآن — منفّذ:</strong>
+            تم اعتماد <b>خيار A + B معاً</b>:
+            الشريط السفلي = خريطة · فيديو · <b>الخبراء</b> · خدمات · ملف
+            (المفضلة انتقلت للملف الشخصي) ·
+            «اطلب رأي خبير» من تفاصيل الإعلان وتغذية الفيديو ·
+            صفحة عامة + بطاقات تفاعلية · اعتماد إداري → شارة <b>موثوق</b> فوراً ·
+            لوحة CRM (نظرة عامة / طلبات / صفحتي / تقييمات) بعد الاعتماد.
+            <br /><br />
+            <b>أدلة:</b>
+            <code>bottom_navigation.dart</code> ·
+            <code>experts_list_screen.dart</code> ·
+            <code>expert_crm_screen.dart</code> ·
+            <code>expert_detail_screen.dart</code> ·
+            <code>backend/experts.js</code> ·
+            <code>admin/routes.js</code> (اعتماد → verified).
+          </div>
+
+          <h4 style="font-family:Cairo,sans-serif">ربط بالإعلان — لماذا هو أهم من التبويب؟</h4>
+          <p style="color:var(--ink-soft);line-height:1.8">
+            التبويب يُظهر المكان. الربط في أسفل إعلان المنقية/الصقر/حصان السباق يُظهر الفائدة.
+            أمام نادي: عرض مسار «إعلان → رأي خبير معتمد» أقوى من أيقونة خامسة في الشريط.
+          </p>
+        </div>
+
+        <!-- TAGS -->
+        <div class="debate-panel" id="debate-tags">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">وسوم Tags لا أقسام جديدة — أقوى قرار UX في النقاش</h3>
+          <p style="color:var(--ink-soft);line-height:1.8;margin-top:0">
+            فتح أقسام رئيسية (منقيات / مزاين / خيل السباق…) يضاعف الـ IA ويكسر بساطة الواجهة الحالية — وهي نقطة قوة حقيقية في الكود الحالي
+            (Chips الأنواع في الخدمات + فلاتر الفيديو موجودة نمطياً).
+          </p>
+
+          <table class="compare-table">
+            <thead>
+              <tr><th>المقترح</th><th>الأثر على UX</th><th>التوافق مع الكود</th><th>الحكم</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>أقسام رئيسية جديدة لكل فئة</td>
+                <td>تشتيت · تنقل أعمق · صيانة فلاتر مضاعفة</td>
+                <td>يكسر بساطة VideoHub / Map species</td>
+                <td><span class="score low">مرفوض</span></td>
+              </tr>
+              <tr>
+                <td>وسوم داخل صقور/خيل/إبل + Badges</td>
+                <td>يبقى الإطار · يزيد الدقة</td>
+                <td>يمتد على Chips/فلاتر موجودة</td>
+                <td><span class="score high">مُعتمد</span></td>
+              </tr>
+              <tr>
+                <td>فلتر «الفئة المميزة» ديناميكي حسب النوع</td>
+                <td>تمييز النخبة دون ازدحام</td>
+                <td>حقل tags/badges على listing+video</td>
+                <td><span class="score high">مُعتمد</span></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="callout">
+            <b>حالة التنفيذ الآن — منفّذ بعزل تقني:</b>
+            مفاتيح مسبوقة بالنوع فقط:
+            <code>camel_manqiyat</code> · <code>horse_beauty</code> · <code>falcon_hur</code> …
+            sanitize في Flutter + Node · عرض/فلتر يرفض التسرّب عبر الأنواع ·
+            شارات ثقة إدارية منفصلة <code>verified/featured/elite</code>.
+            <br />
+            <b>أدلة:</b>
+            <code>heritage_tags.dart</code> ·
+            <code>heritage_badges.dart</code> ·
+            <code>backend/heritage_tags_badges.js</code> ·
+            <code>HeritageTagPicker</code> · فلاتر الخريطة والفيديو.
+          </div>
+        </div>
+
+        <!-- RANK -->
+        <div class="debate-panel" id="debate-rank">
+          <h3 style="margin-top:0;font-family:Cairo,sans-serif">مقارنة شاملة × هيكل المشروع × UX</h3>
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>المحاور</th>
+                <th>الهوية أولاً</th>
+                <th>10 خدمات فوراً</th>
+                <th>تبويب خبراء فوراً</th>
+                <th>وسوم + رأي خبير</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ملاءمة الكود الحالي</td>
+                <td><span class="score high">9</span></td>
+                <td><span class="score low">4</span></td>
+                <td><span class="score mid">6</span></td>
+                <td><span class="score high">9</span></td>
+              </tr>
+              <tr>
+                <td>وضوح UX للمستخدم</td>
+                <td><span class="score high">8</span></td>
+                <td><span class="score mid">5</span></td>
+                <td><span class="score mid">7</span></td>
+                <td><span class="score high">9</span></td>
+              </tr>
+              <tr>
+                <td>جاهزية عرض للأندية</td>
+                <td><span class="score high">9</span></td>
+                <td><span class="score mid">5</span></td>
+                <td><span class="score high">8</span></td>
+                <td><span class="score high">8</span></td>
+              </tr>
+              <tr>
+                <td>المخاطر / الفراغ</td>
+                <td><span class="score high">منخفض</span></td>
+                <td><span class="score low">عالي</span></td>
+                <td><span class="score mid">متوسط</span></td>
+                <td><span class="score high">منخفض</span></td>
+              </tr>
+              <tr>
+                <td>التفضيل النهائي</td>
+                <td colspan="4" style="font-weight:800;color:var(--bronze)">
+                  ✓ نُفّذ: Desert Luxury · وسوم+باجات · تسميات خدمات · اطلب رأي · تبويب خبراء+CRM+موثوق ·
+                  التالي: دفع · KB · مستشار AI · كيان منقيات · مزاد حي · Home/+ /Inbox
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4 style="font-family:Cairo,sans-serif;margin-top:22px">سلم الأولوية التنفيذي (اضغط للتفاصيل)</h4>
+          <ol class="prio-list" id="prioList">
+            <li class="open">
+              <div class="prio-num">✓</div>
+              <div>
+                <b>Design System Desert Luxury — منفّذ</b>
+                <div class="more">ألوان/ثيم مركزي في Flutter · أدلة في قسم «ما نُفّذ».</div>
+              </div>
+            </li>
+            <li class="open">
+              <div class="prio-num">✓</div>
+              <div>
+                <b>وسوم التميّز + Badges إدارية — منفّذ</b>
+                <div class="more">heritage_tags.dart + heritage_tags_badges.js · عزل حسب النوع · موثّق/مميّز/نخبة.</div>
+              </div>
+            </li>
+            <li class="open">
+              <div class="prio-num">✓</div>
+              <div>
+                <b>شبكة خبراء + اطلب رأي + تبويب + CRM + موثوق — منفّذ</b>
+                <div class="more">experts.js · expert_crm_screen · bottom_navigation خبراء · اعتماد إداري → verified.</div>
+              </div>
+            </li>
+            <li class="open">
+              <div class="prio-num">✓</div>
+              <div>
+                <b>إعادة تسمية طبقة الخدمات — منفّذ</b>
+                <div class="more">nomas_service_labels.dart · مفاتيح API دون تغيير.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">5</div>
+              <div>
+                <b>التالي: دفع حقيقي · KB · مستشار AI</b>
+                <div class="more">بعد استقرار المحتوى؛ الخبراء البشريون الواجهة للأندية.</div>
+              </div>
+            </li>
+            <li>
+              <div class="prio-num">6</div>
+              <div>
+                <b>تدريب · إعلام · بطولات · كيان منقيات كامل</b>
+                <div class="more">بالترتيب حسب الشركاء — الوسم موجود، الكيان الكامل لاحقاً.</div>
+              </div>
+            </li>
+          </ol>
+
+          <div class="verdict" style="margin-top:18px">
+            <strong>تحديث الموقف (يوليو 2026):</strong>
+            موجة الهوية+الوسوم+الخبراء أُنجزت في الكود. المتبقي للمرحلة ٢:
+            دفع · تعليم/KB · مستشار AI · مزاد حي · بطولات · Home/+ /Inbox.
+            <br /><br />
+            <strong>ما أوافق عليه بالكامل:</strong>
+            نقد الهوية · وسوم بدل أقسام · الخبراء البشريون واجهة الأندية · الذكاء الاصطناعي طبقة مساعدة لاحقة.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="slides">
+      <div class="section-head">
+        <div>
+          <h2>الشرائح المرجعية</h2>
+          <p>اضغط للتكبير. هذه هي مصدر الرؤية التي قورنت بالكود.</p>
+        </div>
+      </div>
+      <div class="slides">
+        <figure class="slide" data-full="assets/future-vision.png">
+          <img src="assets/future-vision.png" alt="الرؤية المستقبلية لنوماس" />
+          <figcaption>الرؤية المستقبلية — أعمدة خيل / إبل / صقور + مستشارون + توسع</figcaption>
+        </figure>
+        <figure class="slide" data-full="assets/phase2.png">
+          <img src="assets/phase2.png" alt="المرحلة الثانية لنوماس" />
+          <figcaption>المرحلة الثانية — 11 هدفاً: مستشارون، تعليم، بطولات، مزادات، فرديات، منقيات…</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <div class="controls" id="filters">
+      <input class="search" id="q" type="search" placeholder="ابحث: مستشار، مزاد، خريطة، OTP…" />
+      <button class="chip active" data-filter="all">الكل</button>
+      <button class="chip" data-filter="ok">منفّذ</button>
+      <button class="chip" data-filter="partial">جزئي</button>
+      <button class="chip" data-filter="no">غير منفّذ</button>
+      <button class="chip" data-filter="p1">المرحلة ١</button>
+      <button class="chip" data-filter="p2">المرحلة ٢</button>
+      <button class="btn" id="expandAll">فتح كل الأدلة</button>
+    </div>
+    <div class="legend">
+      <span class="badge ok">IMPLEMENTED</span>
+      <span class="badge partial">PARTIAL</span>
+      <span class="badge no">NOT_IMPLEMENTED</span>
+    </div>
+
+    <section id="phase1">
+      <div class="section-head">
+        <div>
+          <h2>المرحلة الأولى — ما بُني فعلاً</h2>
+          <p>أساس السوق الرقمي للموروث. هذه القدرات موجودة في الكود ويمكن إثباتها بمسارات ملفات.</p>
+        </div>
+      </div>
+      <div class="grid" id="phase1Grid"></div>
+    </section>
+
+    <section id="phase2">
+      <div class="section-head">
+        <div>
+          <h2>المرحلة الثانية والرؤية — ماذا لم يُنفَّذ؟</h2>
+          <p>كل بطاقة قابلة للفتح: الدليل، الفجوة، المكان المناسب في التطبيق، وخطة التنفيذ المقترحة.</p>
+        </div>
+      </div>
+      <div class="grid" id="phase2Grid"></div>
+    </section>
+
+    <section id="placement">
+      <div class="section-head">
+        <div>
+          <h2>المكان المناسب لكل خدمة — ولماذا؟</h2>
+          <p>انقر العمود: أين تُوضع الخدمة داخل تجربة نوماس الحالية دون كسر المنتج.</p>
+        </div>
+      </div>
+      <div class="arch" id="pillars">
+        <article class="pillar active" data-pillar="horse">
+          <div class="icon">🐎</div>
+          <h3>عمود الخيل</h3>
+          <p style="margin:0;color:var(--ink-soft);font-size:.9rem;line-height:1.7">تبويب فيديو الخيول + خريطة species=horse + خدمات مربوطة بالخيل.</p>
+          <ul>
+            <li>مستشار الخيل → تبويب داخل مركز الفيديو / شاشة نوع</li>
+            <li>السلالات والسباقات → معرفة + تقييم</li>
+            <li>المرابط → يوسّع مسار الإسطبل الحالي</li>
+          </ul>
+        </article>
+        <article class="pillar" data-pillar="camel">
+          <div class="icon">🐪</div>
+          <h3>عمود الإبل</h3>
+          <p style="margin:0;color:var(--ink-soft);font-size:.9rem;line-height:1.7">وسوم تميّز (منقيات/فرديات/مزاين) منفّذة؛ الكيان الكامل للمنقية ما زال جزئياً.</p>
+          <ul>
+            <li>مستشار الإبل AI → غير منفّذ</li>
+            <li>وسم المنقيات / الفرديات → <code>camel_manqiyat</code> / <code>camel_fardi*</code> ✓</li>
+            <li>دليل المزاين كـ KB → غير منفّذ (وسم mazayen للسوق ✓)</li>
+          </ul>
+        </article>
+        <article class="pillar" data-pillar="falcon">
+          <div class="icon">🦅</div>
+          <h3>عمود الصقور</h3>
+          <p style="margin:0;color:var(--ink-soft);font-size:.9rem;line-height:1.7">قوائم وتصنيف موجودة؛ المستشار والبطولات غائبة.</p>
+          <ul>
+            <li>مستشار الصقور → داخل تبويب الصقور</li>
+            <li>التدريب والعناية → محتوى تعليمي + دردشة</li>
+            <li>البطولات → وحدة فعاليات مشتركة</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="panel" style="margin-top:14px" id="placementDetail">
+        <h3 style="margin-top:0;font-family:Cairo,sans-serif">خريطة الموضع المقترحة</h3>
+        <div id="placementBody"></div>
+      </div>
+
+      <div class="section-head" style="margin-top:28px">
+        <div>
+          <h2>شريط التنقل: الحالي مقابل الرؤية الكاملة</h2>
+          <p>التطبيق حدّث الشريط (خبراء بدل مفضلة). الرؤية الكاملة ما زالت تريد Home / بحث / + / إشعارات.</p>
+        </div>
+      </div>
+      <div class="nav-compare">
+        <div class="phone">
+          <h4>التطبيق الحالي (كود · يوليو 2026)</h4>
+          <div class="tabs">
+            <div class="tab on">خريطة</div>
+            <div class="tab">فيديو</div>
+            <div class="tab on">خبراء</div>
+            <div class="tab">خدمات</div>
+            <div class="tab">ملف</div>
+          </div>
+          <p style="font-size:.85rem;line-height:1.7;opacity:.85;margin:14px 8px 4px">
+            الدليل: <code style="color:#d4a85a">bottom_navigation.dart</code> —
+            خريطة · فيديو · خبراء · خدمات · ملف · المفضلة داخل الملف.
+          </p>
+        </div>
+        <div class="phone">
+          <h4>رؤية الشريحة (مستهدف)</h4>
+          <div class="tabs">
+            <div class="tab">رئيسية</div>
+            <div class="tab">بحث</div>
+            <div class="tab on"><div class="plus">+</div>إضافة</div>
+            <div class="tab">إشعارات</div>
+            <div class="tab">ملف</div>
+          </div>
+          <p style="font-size:.85rem;line-height:1.7;opacity:.85;margin:14px 8px 4px">
+            غير منفّذ بعد: لا تبويب Home موحّد، لا Search مركزي، لا زر + وسط، لا Inbox إشعارات (FCM).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div>
+          <h2>كيف ننفّذ كل المراحل بدقة وجودة؟</h2>
+          <p>اضغط كل مرحلة للتفاصيل التقنية. الترتيب يحمي المرحلة الأولى ولا يبني ذكاءً على أساس هش.</p>
+        </div>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+    <footer>
+      نُشر على <code>/vision/</code> ضمن باك‌اند نوماس · مصدر الحقيقة = مستودع الكود (آخر تحديث تدقيق: ١٤ يوليو 2026).<br />
+      مباشرة على Render بعد النشر: <code>https://horse-backend-i68h.onrender.com/vision/</code>
+      · Commit الخلفية يضم <code>experts.js</code> + هذه الصفحة.
+    </footer>
+  </div>
+
+  <div class="toast" id="toast">تم النسخ</div>
+  <div class="lightbox" id="lightbox">
+    <button type="button" id="closeLb">إغلاق</button>
+    <img id="lbImg" alt="" />
+  </div>
+
+  <script>
+    const FEATURES = [
+      // Phase 1
+      {
+        id: "map", phase: "p1", status: "ok", title: "إعلانات الخريطة + الصور",
+        summary: "إضافة إعلان خيل/إبل/صقر مع صور وموقع وفلاتر الأنواع.",
+        evidence: [
+          "app/lib/features/map/screens/add_horse_screen.dart",
+          "app/lib/features/map/screens/map_screen.dart",
+          "app/lib/domain/entities/listing_species.dart",
+          "backend/index.js → GET/POST /horses"
+        ],
+        place: "الخريطة (التبويب الحالي #0) — نقطة الدخول الأساسية للبيع المحلي.",
+        why: "الإعلان الجغرافي هو قلب المرحلة ١؛ يبقى كما هو ويُغذّي لاحقاً الفرديات/المنقيات كفلاتر أعمق.",
+        how: "تعزيز جودة الصور، تحقق البائع، وربط الإعلان لاحقاً بالمزاد/التقييم دون تغيير المسار الأساسي."
+      },
+      {
+        id: "video", phase: "p1", status: "ok", title: "مركز الفيديو (خيل · إبل · صقور · خدمات)",
+        summary: "بطاقات أنواع + تغذية عمودية + رفع فيديو حسب التبويب.",
+        evidence: [
+          "app/lib/features/video/screens/video_hub_screen.dart",
+          "horse_video_feed_screen.dart / service_video_feed_screen.dart",
+          "main.dart routes /video/horses|camels|falcons|services",
+          "backend → /videos"
+        ],
+        place: "تبويب الفيديو — ومنه تُفتح المستشارات لاحقاً كطبقة فوق كل نوع.",
+        why: "الرؤية تجعل الأنواع أعمدة؛ الفيديو الحالي أقرب شاشة لها.",
+        how: "إضافة مدخل «مستشار» داخل كل تبويب نوع دون إزالة الرفع/التصفح."
+      },
+      {
+        id: "auth", phase: "p1", status: "ok", title: "مصادقة جوال OTP + تصفح زائر",
+        summary: "دخول برقم الجوال، عدّاد OTP، حوار تسجيل للزائر قبل الإعجاب/الرفع.",
+        evidence: [
+          "guest_session.dart",
+          "phone_login_screen.dart / otp_verify_screen.dart",
+          "backend/index.js /auth/otp/send|verify",
+          "backend/sms/ + otp_dev.js"
+        ],
+        place: "بوابة التطبيق بالكامل — أساس أي مستشار/مزاد يتطلب هوية.",
+        why: "بدون جلسة موثوقة لا مزادات ولا تقييمات ولا اشتراكات معرفة.",
+        how: "تثبيت حفظ refreshTokens على القرص قبل بناء ميزات مدفوعة."
+      },
+      {
+        id: "market", phase: "p1", status: "ok", title: "سوق الكتالوج (أعلاف · معدات · أدوات)",
+        summary: "كتالوج حسب النوع + سلة وطلبات.",
+        evidence: [
+          "marketplace/screens/feed_catalog_screen.dart",
+          "equipment_catalog_screen.dart / supplies_catalog_screen.dart",
+          "backend catalogItems / cart / orders"
+        ],
+        place: "تحت الخدمات حسب النوع (ServicesHomeScreen).",
+        why: "التجارة المادية منفصلة عن الاستشارات المعرفية — لا تخلطها في نفس الشاشة.",
+        how: "بوابة دفع حقيقية ثم توصيات مستشار تربط منتج الكتالوج بالحالة."
+      },
+      {
+        id: "services", phase: "p1", status: "ok", title: "منصة الخدمات المهنية",
+        summary: "نقل · بيطرة · إسطبل/مربط + حجوزات ومقدّمو خدمة.",
+        evidence: [
+          "services/screens/services_home_screen.dart",
+          "transportation/ · veterinary/ · stable/",
+          "backend /services · /bookings"
+        ],
+        place: "تبويب الخدمات الحالي — يُوسَّع لاحقاً بطبقة «مستشار يقترح خدمة».",
+        why: "الشريحة تسمي «منصة خدمات متكاملة»؛ الأساس موجود كمرحلة ١.",
+        how: "API توصيات من المستشار → حجز خدمة موجودة (لا إعادة بناء)."
+      },
+      {
+        id: "favorites", phase: "p1", status: "ok", title: "المفضلة داخل الملف الشخصي",
+        summary: "المفضلة لم تعد تبويباً سفلياً — مدخلها من الملف (فردي / معلن / مزوّد). الشريط يستقبل الخبراء.",
+        evidence: [
+          "profile_individual_screen.dart → /favorites",
+          "profile_horse_owner_screen.dart · profile_service_provider_screen.dart",
+          "favorites/screens/favorites_screen.dart",
+          "bottom_navigation.dart — لم يعد يحوي المفضلة"
+        ],
+        place: "الملف الشخصي — عنصر قائمة «المفضلة».",
+        why: "تحرير الشريط لعمود الهوية (الخبراء) دون فقدان الحفظ.",
+        how: "محافظ عليه؛ لاحقاً مفضلة فيديو منفصلة إن لزم."
+      },
+      {
+        id: "experts", phase: "p1", status: "ok", title: "الخبراء المعتمدون (تبويب + ملف عام)",
+        summary: "تبويب سفلي «الخبراء» · بطاقات تفاعلية · صفحة عامة · طلب اعتماد بهوية إلزامية · موثوق بعد موافقة الإدارة · اطلب رأي خبير.",
+        evidence: [
+          "map/widgets/bottom_navigation.dart → label الخبراء",
+          "map_screen.dart case 2 → /experts",
+          "experts/screens/experts_list_screen.dart · expert_detail_screen.dart · expert_apply_screen.dart",
+          "request_expert_opinion_sheet.dart (إعلان+فيديو)",
+          "backend/experts.js · POST /experts/apply · GET /experts",
+          "admin/routes.js PATCH /experts/:id → verified + trustBadge"
+        ],
+        place: "التبويب #2 في الشريط · وطلبات الرأي من تفاصيل الإعلان/الفيديو.",
+        why: "عمود هوية مؤسسي كما في الرؤية — شبكة بشرية معتمدة لا مستشار AI وحيد.",
+        how: "تم V1؛ لاحقاً محادثة داخلية/حجز مدفوع خارج النطاق الحالي."
+      },
+      {
+        id: "expert_crm", phase: "p1", status: "ok", title: "CRM الخبير المعتمد",
+        summary: "لوحة بعد الاعتماد: نظرة عامة · صندوق طلبات الرأي والرد · تعديل الصفحة العامة · تقييمات قراءة فقط · إيقاف استقبال الطلبات.",
+        evidence: [
+          "experts/screens/expert_crm_screen.dart",
+          "main.dart route /experts/crm",
+          "backend/experts.js PATCH /experts/me · acceptingRequests",
+          "GET /experts/requests/mine → asExpert + إحصاءات",
+          "PATCH /experts/requests/:id/reply",
+          "ملف شخصي: «لوحة الخبير» إن status===approved"
+        ],
+        place: "الملف الشخصي → لوحة الخبير (للمعتمدين فقط).",
+        why: "بدون صندوق طلبات لا قيمة لشبكة الخبراء.",
+        how: "V1 مكتمل؛ سرعة الرد المتقدمة اختيارية لاحقاً."
+      },
+      {
+        id: "tags_badges", phase: "p1", status: "ok", title: "وسوم تميّز حسب النوع + شارات ثقة إدارية",
+        summary: "وسوم مسبوقة بالنوع (منقيات/جمال/حر…) بلا تسرّب بين الأنواع. شارات موثّق/مميّز/نخبة من الإدارة فقط.",
+        evidence: [
+          "domain/constants/heritage_tags.dart (camel_/horse_/falcon_/sheep_)",
+          "domain/constants/heritage_badges.dart",
+          "backend/heritage_tags_badges.js sanitizeTags · scrubItemTags · itemHasTag",
+          "shared/widgets/heritage_tag_badge_chips.dart",
+          "filters_bottom_sheet · video overlays · add_horse/sheep/video",
+          "admin Listings/Videos badge toggles"
+        ],
+        place: "إنشاء/عرض الإعلان والفيديو + فلاتر الخريطة/الفيديو.",
+        why: "بديل صحيح عن أقسام رئيسية جديدة — يطابق قرار الرؤية.",
+        how: "مكتمل عزلًا؛ لاحقاً شارة فرديات/منقيات كصفحة علامة إن لزم (كيان منفصل)."
+      },
+      {
+        id: "service_labels", phase: "p1", status: "ok", title: "تسميات الخدمات الموحّدة",
+        summary: "نقل→النقل واللوجستيات · بيطرة→الصحة والرعاية · إسطبل→الإيواء · أدوات→المتجر عبر مصدر واحد.",
+        evidence: [
+          "shared/constants/nomas_service_labels.dart",
+          "services_home_screen · registration roles · video catalog",
+          "مفاتيح API القديمة محفوظة (transportation/veterinary/…)"
+        ],
+        place: "طبقة العرض فقط — لا كسر للـ API.",
+        why: "هوية لغوية أوضح دون إعادة بناء الـ IA.",
+        how: "متابعة أي نص واجهة قديم يظهر خارج المصدر المركزي."
+      },
+      {
+        id: "payments", phase: "p1", status: "partial", title: "المدفوعات داخل التطبيق",
+        summary: "شاشات بطاقات موجودة لكن الدفع محاكى ومعطّل بعلم.",
+        evidence: [
+          "AppConfig.enableInAppCardPayments = false",
+          "payment/services/payment_service.dart (محاكاة)",
+          "payment/screens/*"
+        ],
+        place: "قبل تفعيل المزادات الحية والاشتراكات التعليمية.",
+        why: "أي مزاد/رسوم بطولة بلا بوابة دفع = مخاطرة منتج.",
+        how: "دمج Moyasar/Tap، ثم feature flag، ثم escrow للمزادات."
+      },
+      {
+        id: "taxonomy", phase: "p1", status: "ok", title: "تصنيفات السوق (ليست قواعد معرفة)",
+        summary: "قوائم سلالة/لون/عمر/نوع صقر للفلاتر والحقول — أدوات منتج لا KB.",
+        evidence: [
+          "domain/constants/saudi_livestock_taxonomy.dart",
+          "heritage_video_listing_fields.dart",
+          "filter_model.dart"
+        ],
+        place: "طبقة بيانات مشتركة تغذي لاحقاً قواعد المعرفة.",
+        why: "أفضل بذرة لـ KB — لكن اليوم ليست مقالات ولا بحث دلالي.",
+        how: "ترحيل الثوابت إلى جداول محتوى قابلة للتحرير من لوحة الإدارة."
+      },
+
+      // Phase 2
+      {
+        id: "c_horse", phase: "p2", status: "no", title: "مستشار الخيل",
+        summary: "لا شاشة دردشة/استشارة ولا محرك توصيات. يوجد فقط تصنيف خيل في السوق + خبراء بشريون.",
+        evidence: [
+          "لا مجلد features/consultant*",
+          "لا استدعاءات OpenAI/LLM في app أو backend",
+          "SaudiHorseTaxonomy = حقول إعلان فقط",
+          "شبكة experts بشرية ≠ مستشار AI"
+        ],
+        place: "داخل تبويب فيديو الخيول + اختصار من بطاقة النوع في الرؤية الرئيسية المستقبلية.",
+        why: "المستخدم يدخل عالم الخيل أولاً ثم يسأل المستشار — لا تبويب سفلي سادس.",
+        how: "Chat UI + RAG على مقالات خيل؛ يمكن لاحقاً مساعدة داخل ملف الخبير البشري."
+      },
+      {
+        id: "c_camel", phase: "p2", status: "no", title: "مستشار الإبل",
+        summary: "غير موجود كمنتج AI. التصنيف العمري/اللوني + وسوم منقيات/فرديات للسوق فقط.",
+        evidence: [
+          "SaudiCamelTaxonomy في saudi_livestock_taxonomy.dart",
+          "heritage_tags.dart → camel_manqiyat / camel_fardi …",
+          "صفر نتائج لمستشار/AI في كود المنتج"
+        ],
+        place: "عمود الإبل — أهم مستشار استراتيجياً (فرديات/منقيات/مزاين).",
+        why: "الشريحة تضع مستشار الإبل في قلب التوسع؛ يحتاج مدخل بارز من بطاقة الإبل.",
+        how: "نفس بنية المستشار الموحّدة + plugins خاصة (دليل منقيات، مزاين)."
+      },
+      {
+        id: "c_falcon", phase: "p2", status: "no", title: "مستشار الصقور",
+        summary: "غير منفّذ كـ AI. توجد قوائم أنواع + وسوم حر/شاهين/جير…",
+        evidence: ["SaudiFalconTaxonomy", "falcon_* في heritage_tags.dart", "لا consultant feature"],
+        place: "تبويب الصقور في مركز الفيديو.",
+        why: "يتماشى مع عمود الرؤية الثالث دون تشتيت الشريط السفلي.",
+        how: "محتوى عناية/تدريب + تقييم ريش/صحة كأدوات داخل المحادثة."
+      },
+      {
+        id: "edu", phase: "p2", status: "no", title: "المحتوى التعليمي",
+        summary: "لا دورات ولا مقالات ولا مكتبة فيديو تعليمية منفصلة عن سوق الفيديو.",
+        evidence: ["لا features/education أو courses"],
+        place: "قسم «تعلّم» داخل كل عمود نوع + مكتبة عامة من الملف الشخصي.",
+        why: "التعليم يغذي المستشار (RAG) والمستخدم؛ يجب أن يكون محتوى أولًا لا دردشة فقط.",
+        how: "CMS مقالات/دروس في لوحة الإدارة → تطبيق Flutter reader + تقدم المستخدم."
+      },
+      {
+        id: "events", phase: "p2", status: "no", title: "البطولات والفعاليات",
+        summary: "لا كيان Tournament/Event. درجات «عرض/مسابقة» في تصنيف الإبل = فلاتر عمر فقط.",
+        evidence: [
+          "SaudiCamelTaxonomy.ageShowOrContestGrades",
+          "لا API فعاليات"
+        ],
+        place: "شاشة أفقية مشتركة تحت الرئيسية المستقبلية، مع فلتر نوع (خيل/إبل/صقر).",
+        why: "الفعاليات عابرة للأنواع؛ لا تدفنها داخل تبويب واحد فقط.",
+        how: "Event model + خريطة مواقع + تسجيل مشاركة + ربط لاحقاً بالتقييم."
+      },
+      {
+        id: "auction", phase: "p2", status: "partial", title: "المزادات الرقمية (على السوم ≠ مزاد حي)",
+        summary: "وضع تسعير «على السوم» في الإعلان فقط. لا مزايدة حية ولا غرفة مزاد.",
+        evidence: [
+          "_ListingPriceMode.auction في add_horse_screen.dart",
+          "ListingPricingMode.auction → «على السوم»",
+          "docs: نوماس مزاد خارج النطاق الحالي"
+        ],
+        place: "منشور منفصل «نوماس مزاد» + ربط من بطاقة الإعلان؛ ليس استبدال الخريطة.",
+        why: "المزاد يحتاج escrow ووقت وإشعارات — طبقة فوق السوق لا داخله عشوائياً.",
+        how: "Auction entity · bids · WebSocket/polling · دفع عربون · إغلاق مجدول."
+      },
+      {
+        id: "individuals", phase: "p2", status: "partial", title: "قسم الفرديات",
+        summary: "نطاق قطيع فردي + وسم تميّز camel_fardi/camel_fardiyat — وليست ساحة فرديات كاملة.",
+        evidence: [
+          "CamelHerdBand.singleOrFew",
+          "Horse.herdCount",
+          "heritage_tags.dart → camel_fardi · camel_fardiyat",
+          "ProfileIndividualScreen (نوع حساب)"
+        ],
+        place: "فلتر/وسم تحت عمود الإبل؛ لاحقاً معرض فرديات أغنى.",
+        why: "الرؤية تريد معرض فرديات؛ اليوم وسم+خاصية قطيع.",
+        how: "Listing vertical + قوالب عرض أغنى (نسب، إنتاج)."
+      },
+      {
+        id: "manqiyat", phase: "p2", status: "partial", title: "قسم المنقيات",
+        summary: "وسم تميّز camel_manqiyat منفّذ ومعزول. لا كيان Manqiya (مالك/قطيع/وثائق) بعد.",
+        evidence: [
+          "heritage_tags.dart → camel_manqiyat «منقيات»",
+          "sanitize/belongsToSpecies يرفض تسرّب الوسم لغير الإبل",
+          "لا Manqiya entity / صفحة علامة للمنقية"
+        ],
+        place: "وسم داخل إعلانات الإبل حالياً؛ صفحة منقية لاحقاً.",
+        why: "مفهوم خليجي متخصص؛ الوسم خطوة أولى صحيحة قبل الكيان الكامل.",
+        how: "كيان Manqiya (مالك، موقع، قطيع، وثائق) + معرض مرتبط بالإعلانات."
+      },
+      {
+        id: "analytics", phase: "p2", status: "partial", title: "التحليلات الذكية",
+        summary: "لوحة بائع/إدارة لأرقام تشغيلية + إحصاءات CRM خبير — ليست تحليلات ذكية للحيوان.",
+        evidence: [
+          "backend/admin analytics routes",
+          "dashboard/screens/dashboard_screen.dart",
+          "expert_crm_screen نظرة عامة (طلبات/تقييمات)"
+        ],
+        place: "للمستخدم: داخل المستشار وملف المالك. للإدارة: لوحة موجودة.",
+        why: "خلط تحليلات التشغيل مع «ذكاء الموروث» يوهم بالإنجاز.",
+        how: "مؤشرات سعر السوق، صحة القطيع، أداء المزاد — نماذج منفصلة عن /admin."
+      },
+      {
+        id: "kb", phase: "p2", status: "no", title: "قواعد المعرفة",
+        summary: "لا قاعدة معرفة قابلة للبحث. التصنيفات الثابتة والوسوم ليست KB.",
+        evidence: ["saudi_livestock_taxonomy.dart", "heritage_tags.dart — labels فقط"],
+        place: "طبقة خلفية مشتركة تغذي المستشارين والتعليم.",
+        why: "بدون KB المستشار يهذي؛ ابنِ المحتوى قبل الـ LLM.",
+        how: "مقالات مهيكلة + embeddings + إدارة مراجعة خبير."
+      },
+      {
+        id: "traits", phase: "p2", status: "no", title: "تقييم الصفات والمواصفات",
+        summary: "حقول وصفية + تقييم نجوم للخبير البشري — لا سير عمل تحكيم درجات للحيوان.",
+        evidence: [
+          "حقول camelAgeGrade / coat / falcon kind — وصف لا تقييم",
+          "POST /experts/:id/ratings — تقييم خبير لا صفة حيوان"
+        ],
+        place: "أداة داخل المستشار + وضع «تحكيم» في البطولات.",
+        why: "التقييم المعياري يحتاج نموذج درجات وإصدار نتائج.",
+        how: "Rubric JSON حسب النوع + UI درجات + تقرير PDF/مشاركة."
+      },
+      {
+        id: "nav_vision", phase: "p2", status: "partial", title: "تنقل الرؤية (Home · بحث · + · إشعارات)",
+        summary: "الشريط الحالي محدّث (خبراء بدل مفضلة) لكن لا Home موحّد ولا + وسط ولا Inbox/FCM.",
+        evidence: [
+          "bottom_navigation.dart → خريطة/فيديو/خبراء/خدمات/ملف",
+          "SettingsScreen مفاتيح تنبيه فقط — لا NotificationScreen/FCM",
+          "لا تبويب Home ولا زر + مركزي"
+        ],
+        place: "إعادة تصميم تدريجية؛ الخبراء أخذوا موضع المفضلة بنجاح.",
+        why: "تغيير التنقل الكامل يكسر العادات؛ أنجزنا خطوة الهوية أولاً.",
+        how: "مرحلة أ ✓ خبراء. مرحلة ب: زر + عائم. مرحلة ج: Inbox. مرحلة د: Home."
+      },
+      {
+        id: "ai_suite", phase: "p2", status: "no", title: "حزمة المستشارين المتخصصة (تدريب · سباق · مزاين…)",
+        summary: "الوسوم تغطي تسميات (سباق/مزاين/… ) كفلاتر سوق — ليست أدوات مستشار.",
+        evidence: [
+          "لا modules للتدريب/السباق/المزاين كمنتجات AI",
+          "heritage_tags توفر keys فقط للسوق"
+        ],
+        place: "Skills داخل كل مستشار — ليست تطبيقات منفصلة.",
+        why: "تجنّب 15 تطبيقاً داخل التطبيق؛ مستشار واحد بأدوات.",
+        how: "معمارية plugin: كل مهارة = أداة + مصدر معرفة + شاشة نتيجة."
+      }
+    ];
+
+    const ROADMAP = [
+      {
+        t: "✓ موجة يوليو 2026 — منفّذة",
+        b: "Desert Luxury · تسميات الخدمات · وسوم تميّز معزولة حسب النوع · شارات ثقة إدارية · تبويب الخبراء + اطلب رأي + موثوق + CRM الخبير · المفضلة في الملف. أدلة في FEATURES أعلاه."
+      },
+      {
+        t: "0) تثبيت الأساس التشغيلي",
+        b: "حفظ refreshTokens على القرص، تثبيت البناء Profile/Release على الجهاز، مراقبة Render cold start. بدون جلسة مستقرة لا مزاد ولا مستشار AI."
+      },
+      {
+        t: "1) بوابة دفع حقيقية",
+        b: "تفعيل enableInAppCardPayments بعد Moyasar/Tap، ويب هوك، وإيصالات. شرط مسبق للمزادات والبطولات المدفوعة."
+      },
+      {
+        t: "2) قواعد المعرفة + CMS",
+        b: "نقل التصنيفات لمحتوى قابل للتحرير، مقالات حسب خيل/إبل/صقر، مراجعة خبير. هذا يغذي التعليم والمستشار AI."
+      },
+      {
+        t: "3) المحتوى التعليمي (قارئ + تقدّم)",
+        b: "قبل الدردشة: دروس وفيديوهات تعليمية داخل كل عمود. المستشار يستشهد بها بدل الهلوسة."
+      },
+      {
+        t: "4) مستشار موحّد (خيل/إبل/صقر) — AI",
+        b: "شاشة دردشة واحدة بوسائط، RAG، وأدوات. مدخل من بطاقة النوع. يمكن أن يكمّل شبكة الخبراء البشرية لا يستبدلها."
+      },
+      {
+        t: "5) فرديات ومنقيات (كيانات كاملة)",
+        b: "الوسوم موجودة؛ المطلوب Vertical سوقي + كيان منقية. استبدال الاعتماد على الوسم وحده بقسم منتج أوضح."
+      },
+      {
+        t: "6) تقييم الصفات",
+        b: "نماذج درجات حسب النوع، وضع تحكيم، تقارير قابلة للمشاركة — تربط المستشار بالبطولات."
+      },
+      {
+        t: "7) البطولات والفعاليات",
+        b: "كيان Event، خريطة، تسجيل، نتائج. فلتر بالأنواع الثلاثة."
+      },
+      {
+        t: "8) نوماس مزاد (حي)",
+        b: "مزايدات، عدّاد، عربون، إشعارات، تسوية. منفصل عن تسمية «على السوم» الحالية."
+      },
+      {
+        t: "9) تنقل الرؤية المتبقي",
+        b: "خبراء ✓ في الشريط. المتبقي: + عائم → إشعارات → Home للأعمدة الثلاثة."
+      }
+    ];
+
+    const PLACEMENT = {
+      horse: `
+        <p><b>أين؟</b> تبويب <code>/video/horses</code> + فلاتر الخريطة <code>species=horse</code> + خدمات الإسطبل.</p>
+        <ul>
+          <li><b>مستشار الخيل:</b> زر ثابت أعلى تغذية الفيديو / صفحة نوع.</li>
+          <li><b>السباقات والمرابط:</b> أدوات داخل المستشار + ربط حجز إسطبل الحالي.</li>
+          <li><b>لماذا هنا؟</b> المستخدم اختار عالم الخيل مسبقاً — السياق جاهز.</li>
+        </ul>`,
+      camel: `
+        <p><b>أين؟</b> أقوى توسع منتج: تحت عمود الإبل في الفيديو والخريطة، مع صفحات فرعية.</p>
+        <ul>
+          <li><b>فرديات / منقيات:</b> سوق فرعي أو شرائح أعلى الخريطة — ليس مجرد herdCount.</li>
+          <li><b>مستشار الإبل + مزاين:</b> مدخل بارز من بطاقة الإبل في المركز.</li>
+          <li><b>لماذا؟</b> الشريحة تجعل الإبل محور معرفة متخصص؛ دمجه في إعلان عام يضيّع التميز.</li>
+        </ul>`,
+      falcon: `
+        <p><b>أين؟</b> <code>/video/falcons</code> + إعلانات الصقر على الخريطة.</p>
+        <ul>
+          <li><b>مستشار الصقور:</b> نفس قالب المستشار مع مصادر صقارة.</li>
+          <li><b>بطولات:</b> عبر وحدة فعاليات مشتركة بفلتر صقر.</li>
+          <li><b>لماذا؟</b> يحافظ على تناسق الأعمدة الثلاثة في الرؤية.</li>
+        </ul>`
+    };
+
+    const statusLabel = { ok: "منفّذ", partial: "جزئي", no: "غير منفّذ" };
+
+    function cardHTML(f) {
+      return `
+      <article class="card" data-status="${f.status}" data-phase="${f.phase}" data-id="${f.id}" tabindex="0">
+        <div class="card-top">
+          <h3>${f.title}</h3>
+          <span class="badge ${f.status}">${statusLabel[f.status]}</span>
+        </div>
+        <p class="summary">${f.summary}</p>
+        <div class="meta-row">
+          <span class="pill">${f.phase === "p1" ? "المرحلة ١" : "المرحلة ٢ / رؤية"}</span>
+          <span class="pill">اضغط للتفاصيل</span>
+        </div>
+        <div class="details">
+          <h4>أدلة من الكود</h4>
+          <div class="evidence">${f.evidence.map(e => escapeHtml(e)).join("\n")}</div>
+          <h4 style="margin-top:12px">الموضع المناسب</h4>
+          <ul><li>${f.place}</li></ul>
+          <div class="why"><b>لماذا؟</b> ${f.why}</div>
+          <h4 style="margin-top:12px">كيف ننفّذ بجودة؟</h4>
+          <ul><li>${f.how}</li></ul>
+        </div>
+      </article>`;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    const g1 = document.getElementById("phase1Grid");
+    const g2 = document.getElementById("phase2Grid");
+    g1.innerHTML = FEATURES.filter(f => f.phase === "p1").map(cardHTML).join("");
+    g2.innerHTML = FEATURES.filter(f => f.phase === "p2").map(cardHTML).join("");
+
+    document.getElementById("timeline").innerHTML = ROADMAP.map((s, i) => `
+      <div class="step ${i === 0 ? "open" : ""}">
+        <strong>${s.t}</strong>
+        <div class="body">${s.b}</div>
+      </div>`).join("");
+
+    document.getElementById("placementBody").innerHTML = PLACEMENT.horse;
+
+    // counts & rings
+    const ok = FEATURES.filter(f => f.status === "ok").length;
+    const partial = FEATURES.filter(f => f.status === "partial").length;
+    const no = FEATURES.filter(f => f.status === "no").length;
+    document.getElementById("cOk").textContent = ok;
+    document.getElementById("cPartial").textContent = partial;
+    document.getElementById("cNo").textContent = no;
+
+    const p2 = FEATURES.filter(f => f.phase === "p2");
+    const p2Score = p2.reduce((a, f) => a + (f.status === "ok" ? 1 : f.status === "partial" ? 0.35 : 0), 0);
+    const p2Pct = Math.round((p2Score / p2.length) * 100);
+    const p1 = FEATURES.filter(f => f.phase === "p1");
+    const p1Score = p1.reduce((a, f) => a + (f.status === "ok" ? 1 : f.status === "partial" ? 0.5 : 0), 0);
+    const p1Pct = Math.round((p1Score / p1.length) * 100);
+    // الشريط: خبراء ✓ بدل مفضلة — بدون Home/+ /Inbox → تقدّم جزئي للرؤية الكاملة
+    const navPct = 35;
+
+    function animateRing(el, valEl, pct) {
+      let n = 0;
+      const t = setInterval(() => {
+        n += Math.max(1, Math.round(pct / 30));
+        if (n >= pct) { n = pct; clearInterval(t); }
+        el.style.setProperty("--p", n);
+        valEl.textContent = n + "%";
+      }, 20);
+    }
+    setTimeout(() => {
+      animateRing(document.getElementById("ring1"), document.getElementById("ring1v"), p1Pct);
+      animateRing(document.getElementById("ring2"), document.getElementById("ring2v"), p2Pct);
+      animateRing(document.getElementById("ring3"), document.getElementById("ring3v"), navPct);
+      document.getElementById("pctLabel").textContent = p2Pct + "%";
+      document.getElementById("pctBar").style.width = p2Pct + "%";
+    }, 200);
+
+    // filters
+    let filter = "all";
+    const chips = document.querySelectorAll(".chip[data-filter]");
+    chips.forEach(c => c.addEventListener("click", () => {
+      chips.forEach(x => x.classList.remove("active"));
+      c.classList.add("active");
+      filter = c.dataset.filter;
+      applyFilter();
+    }));
+    document.getElementById("q").addEventListener("input", applyFilter);
+
+    function applyFilter() {
+      const q = document.getElementById("q").value.trim();
+      document.querySelectorAll(".card").forEach(card => {
+        const f = FEATURES.find(x => x.id === card.dataset.id);
+        const text = (f.title + f.summary + f.evidence.join(" ") + f.place + f.how).includes(q) || !q;
+        let pass = true;
+        if (filter === "ok" || filter === "partial" || filter === "no") pass = f.status === filter;
+        if (filter === "p1" || filter === "p2") pass = f.phase === filter;
+        card.classList.toggle("hidden", !(pass && text));
+      });
+    }
+
+    // card toggle
+    document.querySelectorAll(".card").forEach(card => {
+      card.addEventListener("click", () => card.classList.toggle("open"));
+      card.addEventListener("keydown", e => { if (e.key === "Enter") card.classList.toggle("open"); });
+    });
+
+    let expanded = false;
+    document.getElementById("expandAll").addEventListener("click", () => {
+      expanded = !expanded;
+      document.querySelectorAll(".card").forEach(c => c.classList.toggle("open", expanded));
+      document.getElementById("expandAll").textContent = expanded ? "طي كل الأدلة" : "فتح كل الأدلة";
+    });
+
+    // timeline
+    document.querySelectorAll(".step").forEach(s => {
+      s.addEventListener("click", () => {
+        document.querySelectorAll(".step").forEach(x => x.classList.remove("open"));
+        s.classList.add("open");
+      });
+    });
+
+    // pillars
+    document.querySelectorAll(".pillar").forEach(p => {
+      p.addEventListener("click", () => {
+        document.querySelectorAll(".pillar").forEach(x => x.classList.remove("active"));
+        p.classList.add("active");
+        document.getElementById("placementBody").innerHTML = PLACEMENT[p.dataset.pillar];
+      });
+    });
+
+    // lightbox
+    const lb = document.getElementById("lightbox");
+    document.querySelectorAll(".slide").forEach(s => {
+      s.addEventListener("click", () => {
+        document.getElementById("lbImg").src = s.dataset.full;
+        lb.classList.add("show");
+      });
+    });
+    document.getElementById("closeLb").onclick = () => lb.classList.remove("show");
+    lb.addEventListener("click", e => { if (e.target === lb) lb.classList.remove("show"); });
+
+    // top nav active
+    const links = [...document.querySelectorAll("#topNav a")];
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(en => {
+        if (en.isIntersecting) {
+          links.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + en.target.id));
+        }
+      });
+    }, { rootMargin: "-40% 0px -50% 0px", threshold: 0.01 });
+    ["overview","delivered","strategy","slides","phase1","phase2","placement","roadmap"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) obs.observe(el);
+    });
+
+    // debate tabs
+    document.querySelectorAll("#debateTabs button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#debateTabs button").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".debate-panel").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        const panel = document.getElementById("debate-" + btn.dataset.debate);
+        if (panel) panel.classList.add("active");
+      });
+    });
+
+    // brand direction cards
+    const dirCopy = {
+      desert: "<b>لماذا Desert Luxury أولاً؟</b> يجمع الصحراء + الذهب + الأسود العميق دون أن يبدو تطبيق ألعاب داكن أو منصة صقارة فقط. يناسب الخريطة والفيديو immersive والخدمات.",
+      falcon: "<b>Falcon Luxury:</b> هوية قوية جداً للصقارة والوضع الداكن. اخترها إذا أردتم dark-first بالكامل — لكن راقبوا أن الإبل/الخيل لا تبدو «ثانوية» بصرياً.",
+      arabian: "<b>Arabian Premium:</b> فاخر عالمي بألوان قليلة. يحتاج انضباط تصميم قاسٍ (مساحات، خطوط، صور). ممتاز لشراكات فاخرة لكن أصعب تنفيذاً على مئات الشاشات.",
+      current: "<b>الحالي:</b> يُستبدل كنظام أساسي. يمكن الإبقاء على درجات رملية فاتحة فقط كخلفيات ثانوية داخل Desert Luxury."
+    };
+    document.querySelectorAll(".dir-card").forEach(card => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".dir-card").forEach(c => c.classList.remove("picked"));
+        card.classList.add("picked");
+        document.getElementById("dirDetail").innerHTML = dirCopy[card.dataset.dir] || dirCopy.desert;
+      });
+    });
+
+    // priority accordion
+    document.querySelectorAll("#prioList li").forEach(li => {
+      li.addEventListener("click", () => {
+        document.querySelectorAll("#prioList li").forEach(x => x.classList.remove("open"));
+        li.classList.add("open");
+      });
+    });
+
+    // toast helper
+    window.copyEvidence = (text) => {
+      navigator.clipboard?.writeText(text);
+      const t = document.getElementById("toast");
+      t.textContent = "تم نسخ مسار الملف";
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 1600);
+    };
+  </script>
+</body>
+</html>
