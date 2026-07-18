@@ -92,7 +92,10 @@ function getCountry(code) {
 /** يحوّل الرقم المحلي إلى E.164 حسب الدولة */
 function normalizePhone(phone, countryCode = DEFAULT_COUNTRY) {
   const country = getCountry(countryCode);
-  let digits = String(phone || '').replace(/\D/g, '');
+  let digits = String(phone || '')
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06f0-\u06f9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/\D/g, '');
 
   if (digits.startsWith(country.dialCode)) {
     digits = digits.slice(country.dialCode.length);

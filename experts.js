@@ -8,6 +8,7 @@
 const BIO_SHORT_MAX = 220;
 const BIO_LONG_MAX = 2000;
 const CERT_MAX = 5;
+const privileged = require('./privileged_access');
 
 function ensureRatingsStore(store) {
   if (!store.expertRatings) store.expertRatings = new Map();
@@ -345,6 +346,7 @@ function createExpertsApi({
         }
 
         const expertId = existing?.id || id();
+        const autoApprove = privileged.isPrivilegedUser(req.authUser);
         const expert = {
           id: expertId,
           userId,
@@ -360,12 +362,15 @@ function createExpertsApi({
           email,
           idCardUrl,
           certificateUrls: certificates,
-          status: 'pending',
-          verified: false,
-          trustBadge: null,
+          status: autoApprove ? 'approved' : 'pending',
+          verified: autoApprove,
+          trustBadge: autoApprove ? 'verified' : null,
           acceptingRequests: true,
           adminRating: null,
           adminRatingNote: '',
+          approvedAt: autoApprove
+            ? new Date().toISOString()
+            : existing?.approvedAt || null,
           createdAt: existing?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };

@@ -363,6 +363,21 @@ function issueAuthForUser(user) {
   const u = roles.migrateLegacyUser({ ...user });
   if (!u.id) u.id = id();
   store.users.set(u.id, u);
+  // مطوّر: اعتماد أي طلب خبير معلّق تلقائياً
+  if (u.isPrivileged && store.experts) {
+    for (const [eid, expert] of store.experts.entries()) {
+      if (String(expert.userId) !== String(u.id)) continue;
+      if (expert.status === 'approved') continue;
+      store.experts.set(eid, {
+        ...expert,
+        status: 'approved',
+        verified: true,
+        trustBadge: 'verified',
+        approvedAt: expert.approvedAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
   const userId = u.id;
   const idToken = token();
   const refreshToken = token();
@@ -383,6 +398,7 @@ function issueAuthForUser(user) {
     accountRole: u.accountRole,
     allowedSpecies: u.allowedSpecies || [],
     capabilities: u.capabilities || [],
+    isPrivileged: Boolean(u.isPrivileged),
     needsOnboarding: !u.accountRole || !roles.isValidAccountRole(u.accountRole),
     expiresIn: 3600,
     user: roles.publicUser(u),

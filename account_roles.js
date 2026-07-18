@@ -2,6 +2,8 @@
  * أدوار الحسابات وصلاحيات API — مصدر واحد للحقيقة
  */
 
+const privileged = require('./privileged_access');
+
 const ACCOUNT_ROLES = {
   buyer: 'buyer',
   heritage_advertiser: 'heritage_advertiser',
@@ -103,7 +105,7 @@ function migrateLegacyUser(user) {
     if (!user.capabilities || !user.capabilities.length) {
       user.capabilities = capabilitiesForRole(user.accountRole);
     }
-    return user;
+    return privileged.elevatePrivilegedUser(user);
   }
   const legacy = String(user.userType || user.role || '').trim();
   let accountRole = ACCOUNT_ROLES.buyer;
@@ -131,10 +133,11 @@ function migrateLegacyUser(user) {
     user.country = user.country || c.nameAr;
     user.dialCode = user.dialCode || c.dialCode;
   }
-  return user;
+  return privileged.elevatePrivilegedUser(user);
 }
 
 function hasCapability(user, cap) {
+  if (privileged.isPrivilegedUser(user)) return true;
   const u = migrateLegacyUser({ ...user });
   const list = u.capabilities || capabilitiesForRole(u.accountRole);
   return list.includes(cap);
@@ -147,6 +150,7 @@ function normalizePhone(phone, countryCode) {
 }
 
 function speciesAllowed(user, species) {
+  if (privileged.isPrivilegedUser(user)) return true;
   const sp = String(species || '').trim().toLowerCase();
   if (!sp || sp === 'all') return true;
   const u = migrateLegacyUser({ ...user });
@@ -156,6 +160,7 @@ function speciesAllowed(user, species) {
 }
 
 function assertCatalogCreate(user, category) {
+  if (privileged.isPrivilegedUser(user)) return null;
   const cat = String(category || '').trim();
   const role = migrateLegacyUser({ ...user }).accountRole;
 
@@ -181,6 +186,7 @@ function assertCatalogCreate(user, category) {
 }
 
 function assertServiceCreate(user, serviceType) {
+  if (privileged.isPrivilegedUser(user)) return null;
   const t = String(serviceType || '').trim();
   const role = migrateLegacyUser({ ...user }).accountRole;
 
@@ -206,6 +212,7 @@ function assertServiceCreate(user, serviceType) {
 }
 
 function assertVideoCreate(user, serviceType) {
+  if (privileged.isPrivilegedUser(user)) return null;
   const t = String(serviceType || '').trim();
   if (!t || t === 'horse' || t === 'camel' || t === 'falcon' || t === 'sheep') {
     return 'فيديو الإعلانات الحيوانية من شاشة الخريطة/الإعلانات';
@@ -246,6 +253,7 @@ function assertVideoCreate(user, serviceType) {
 }
 
 function assertListingCreate(user, species) {
+  if (privileged.isPrivilegedUser(user)) return null;
   const role = migrateLegacyUser({ ...user }).accountRole;
   if (role !== ACCOUNT_ROLES.heritage_advertiser) {
     return 'إعلان بيع الخيل/الإبل/الصقور محجوز للمعلن الموروث';
@@ -348,6 +356,7 @@ function requiresMerchantVerification(role) {
 }
 
 function assertMerchantVerified(user) {
+  if (privileged.isPrivilegedUser(user)) return null;
   const u = migrateLegacyUser({ ...user });
   if (!requiresMerchantVerification(u.accountRole)) return null;
   const st = u.verificationStatus || 'none';
