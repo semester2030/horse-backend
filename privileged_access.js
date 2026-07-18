@@ -58,13 +58,9 @@ function elevatePrivilegedUser(user) {
   user.verificationStatus = 'approved';
   user.verificationNote = user.verificationNote || 'حساب مطوّر — صلاحيات كاملة';
   user.isPrivileged = true;
-  if (!Array.isArray(user.allowedSpecies) || !user.allowedSpecies.length) {
-    user.allowedSpecies = ['horse', 'camel', 'falcon', 'sheep', 'all'];
-  } else if (!user.allowedSpecies.includes('all')) {
-    user.allowedSpecies = Array.from(
-      new Set([...user.allowedSpecies, 'horse', 'camel', 'falcon', 'sheep']),
-    );
-  }
+  // كل الفصائل دائماً — حتى لو كان الحساب معلناً لخيل/إبل/صقور فقط
+  user.allowedSpecies = ['horse', 'camel', 'falcon', 'sheep', 'all'];
+  user.advertiserSpecies = ['horse', 'camel', 'falcon', 'sheep'];
   return user;
 }
 
