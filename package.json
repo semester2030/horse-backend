@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
+    "test:transport": "node scripts/verify-transport-booking-flow.js",
     "build:console": "cd ../admin-web && npm ci && npm run build"
   },
   "engines": {

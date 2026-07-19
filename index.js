@@ -1140,18 +1140,17 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
     if (!service) {
       return res.status(404).json({ message: 'خدمة النقل غير موجودة' });
     }
-    payload = bookingOccupancy.normalizeTransportationBookingPayload(body);
+    payload = bookingOccupancy.normalizeTransportationBookingPayload(
+      body,
+      service,
+    );
     payload.serviceId = serviceId;
     payload.providerId = payload.providerId || service.providerId;
     const origin = payload.details?.origin;
     const destination = payload.details?.destination;
     if (
-      origin == null ||
-      destination == null ||
-      origin.latitude == null ||
-      origin.longitude == null ||
-      destination.latitude == null ||
-      destination.longitude == null
+      !bookingOccupancy.hasValidCoordinates(origin) ||
+      !bookingOccupancy.hasValidCoordinates(destination)
     ) {
       return res.status(400).json({
         message: 'نقطة البداية والوجهة (إحداثيات) مطلوبتان لحجز النقل',
@@ -1160,9 +1159,14 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
     const bookingDate =
       payload.bookingDate ||
       payload.details?.bookingDate ||
-      payload.startDate ||
-      new Date().toISOString();
+      payload.startDate;
+    if (!bookingDate || !bookingOccupancy.toDayKey(bookingDate)) {
+      return res.status(400).json({ message: 'تاريخ النقل مطلوب' });
+    }
     payload.bookingDate = bookingDate;
+    if (payload.details && typeof payload.details === 'object') {
+      payload.details.bookingDate = bookingDate;
+    }
     const cap = bookingOccupancy.evaluateTransportCapacity({
       service,
       bookings: [...store.bookings.values()],
@@ -1350,6 +1354,76 @@ app.patch('/bookings/:id', auth, requireSessionUser, (req, res) => {
     });
   }
 
+  // تعديل موعد/وحدات/مسار النقل — مزوّد فقط + إعادة فحص السعة
+  const touchesTransportSchedule =
+    body.bookingDate != null ||
+    body.unitsRequested != null ||
+    body.origin != null ||
+    body.destination != null ||
+    body.originAddress != null ||
+    body.destinationAddress != null ||
+    (body.details &&
+      (body.details.bookingDate != null ||
+        body.details.unitsRequested != null ||
+        body.details.origin != null ||
+        body.details.destination != null ||
+        body.details.headCount != null ||
+        body.details.numberOfHorses != null ||
+        body.details.birdCount != null));
+
+  if (
+    touchesTransportSchedule &&
+    !touchesStableSchedule &&
+    bookingOccupancy.isTransportBooking(updated)
+  ) {
+    if (!isProvider) {
+      return res.status(403).json({ message: 'تعديل موعد النقل للمزوّد فقط' });
+    }
+    const service = store.services.get(String(updated.serviceId || ''));
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة النقل غير موجودة' });
+    }
+    const merged = bookingOccupancy.normalizeTransportationBookingPayload(
+      { ...updated, ...body },
+      service,
+    );
+    if (
+      !bookingOccupancy.hasValidCoordinates(merged.details?.origin) ||
+      !bookingOccupancy.hasValidCoordinates(merged.details?.destination)
+    ) {
+      return res.status(400).json({
+        message: 'نقطة البداية والوجهة (إحداثيات) مطلوبتان لحجز النقل',
+      });
+    }
+    const bookingDate = merged.bookingDate;
+    if (!bookingDate || !bookingOccupancy.toDayKey(bookingDate)) {
+      return res.status(400).json({ message: 'تاريخ النقل مطلوب' });
+    }
+    const cap = bookingOccupancy.evaluateTransportCapacity({
+      service,
+      bookings: [...store.bookings.values()],
+      unitsRequested: bookingOccupancy.unitsRequestedOf(merged),
+      bookingDate,
+      excludeBookingId: id,
+    });
+    if (!cap.ok) {
+      return res.status(409).json({
+        code: 'TRANSPORT_CAPACITY',
+        message: cap.message || 'سعة النقل غير كافية',
+        capacity: cap.capacity,
+        available: cap.available,
+        used: cap.used,
+      });
+    }
+    Object.assign(updated, {
+      bookingDate: merged.bookingDate,
+      startDate: merged.startDate,
+      unitsRequested: merged.unitsRequested,
+      notes: merged.notes != null ? merged.notes : updated.notes,
+      details: merged.details,
+    });
+  }
+
   store.bookings.set(id, updated);
 
   if (nextStatus && nextStatus !== prevStatus) {
@@ -1394,7 +1468,7 @@ app.get('/services', (req, res) => {
   res.json(list);
 });
 
-/** توفر إيواء حسب الفترة — لا يكرر منطق الحجز؛ يستخدم booking_occupancy فقط */
+/** توفر إيواء أو نقل حسب الفترة — لا يكرر منطق الحجز؛ يستخدم booking_occupancy فقط */
 app.get('/services/:id/availability', (req, res) => {
   const service = store.services.get(req.params.id);
   if (!service) {
@@ -1403,24 +1477,135 @@ app.get('/services/:id/availability', (req, res) => {
   const kind = String(service.type || service.serviceType || '')
     .trim()
     .toLowerCase();
-  if (kind !== 'stable') {
-    return res.status(400).json({ message: 'التوفر اليومي متاح لخدمات الإيواء فقط' });
-  }
-  const from = String(req.query.from || '').trim();
-  const to = String(req.query.to || '').trim();
-  if (!from || !to) {
-    return res.status(400).json({ message: 'from و to مطلوبان (YYYY-MM-DD أو ISO)' });
+  const from = String(req.query.from || req.query.date || '').trim();
+  const to = String(req.query.to || req.query.date || from).trim();
+  if (!from) {
+    return res.status(400).json({
+      message: 'from مطلوب (YYYY-MM-DD أو ISO) — أو date ليوم واحد',
+    });
   }
   if (!bookingOccupancy.toDayKey(from) || !bookingOccupancy.toDayKey(to)) {
     return res.status(400).json({ message: 'تواريخ غير صالحة' });
   }
-  const payload = bookingOccupancy.buildAvailabilityPayload({
-    service,
-    bookings: [...store.bookings.values()],
-    from,
-    to,
+
+  if (kind === 'stable') {
+    if (!to) {
+      return res.status(400).json({ message: 'from و to مطلوبان (YYYY-MM-DD أو ISO)' });
+    }
+    const payload = bookingOccupancy.buildAvailabilityPayload({
+      service,
+      bookings: [...store.bookings.values()],
+      from,
+      to,
+    });
+    return res.json(payload);
+  }
+
+  if (kind === 'transportation' || kind === 'transport') {
+    const unitsRequested = Math.max(
+      1,
+      Math.floor(Number(req.query.units || req.query.unitsRequested || 1) || 1),
+    );
+    const payload = bookingOccupancy.buildTransportAvailabilityPayload({
+      service,
+      bookings: [...store.bookings.values()],
+      from,
+      to: to || from,
+      unitsRequested,
+    });
+    return res.json(payload);
+  }
+
+  return res.status(400).json({
+    message: 'التوفر اليومي متاح لخدمات الإيواء والنقل فقط',
   });
-  res.json(payload);
+});
+
+/**
+ * تقدير مسار/سعر النقل قبل إنشاء الحجز.
+ * Query أو JSON: originLat, originLng, destLat, destLng, units, bookingDate
+ */
+app.post('/services/:id/transport-quote', (req, res) => {
+  const service = store.services.get(req.params.id);
+  if (!service) {
+    return res.status(404).json({ message: 'الخدمة غير موجودة' });
+  }
+  const kind = String(service.type || service.serviceType || '')
+    .trim()
+    .toLowerCase();
+  if (kind !== 'transportation' && kind !== 'transport') {
+    return res.status(400).json({ message: 'عرض السعر متاح لخدمات النقل فقط' });
+  }
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const q = req.query || {};
+  const origin = bookingOccupancy.hasValidCoordinates(body.origin)
+    ? body.origin
+    : {
+        latitude: Number(body.originLat ?? q.originLat),
+        longitude: Number(body.originLng ?? q.originLng),
+        address: body.originAddress || q.originAddress,
+      };
+  const destination = bookingOccupancy.hasValidCoordinates(body.destination)
+    ? body.destination
+    : {
+        latitude: Number(body.destLat ?? q.destLat ?? body.destinationLat),
+        longitude: Number(body.destLng ?? q.destLng ?? body.destinationLng),
+        address: body.destinationAddress || q.destinationAddress,
+      };
+
+  if (
+    !bookingOccupancy.hasValidCoordinates(origin) ||
+    !bookingOccupancy.hasValidCoordinates(destination)
+  ) {
+    return res.status(400).json({
+      message: 'إحداثيات نقطة البداية والوجهة مطلوبة',
+    });
+  }
+
+  const unitsRequested = Math.max(
+    1,
+    Math.floor(
+      Number(body.unitsRequested ?? body.units ?? q.units ?? 1) || 1,
+    ),
+  );
+  const bookingDate =
+    body.bookingDate || q.bookingDate || body.date || q.date || null;
+
+  const quote = bookingOccupancy.estimateTransportQuote({
+    service,
+    origin,
+    destination,
+    unitsRequested,
+  });
+
+  let capacity = null;
+  if (bookingDate && bookingOccupancy.toDayKey(bookingDate)) {
+    capacity = bookingOccupancy.evaluateTransportCapacity({
+      service,
+      bookings: [...store.bookings.values()],
+      unitsRequested,
+      bookingDate,
+    });
+  }
+
+  res.json({
+    serviceId: service.id,
+    serviceName: service.name || '',
+    origin,
+    destination,
+    bookingDate: bookingDate ? bookingOccupancy.toDayKey(bookingDate) : null,
+    ...quote,
+    capacity: capacity
+      ? {
+          ok: capacity.ok,
+          total: capacity.capacity,
+          used: capacity.used,
+          available: capacity.available,
+          message: capacity.message,
+        }
+      : null,
+  });
 });
 
 app.post('/services', auth, requireSessionUser, (req, res) => {
