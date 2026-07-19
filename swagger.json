@@ -222,24 +222,88 @@
       },
       "post": {
         "tags": ["bookings"],
-        "summary": "Create booking (stable: occupancy check)",
+        "summary": "Create booking (stable occupancy / transport capacity / vet slots)",
         "security": [{ "bearerAuth": [] }],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" },
+              "examples": {
+                "transportation": {
+                  "summary": "حجز نقل",
+                  "value": {
+                    "type": "transportation",
+                    "serviceId": "svc_transport_1",
+                    "bookingDate": "2026-08-01",
+                    "unitsRequested": 2,
+                    "paymentMethod": "cash",
+                    "customerName": "فارس",
+                    "customerPhone": "+966500000000",
+                    "origin": {
+                      "latitude": 24.7136,
+                      "longitude": 46.6753,
+                      "address": "الرياض"
+                    },
+                    "destination": {
+                      "latitude": 21.4858,
+                      "longitude": 39.1925,
+                      "address": "جدة"
+                    },
+                    "details": {
+                      "species": "horse",
+                      "numberOfHorses": 2,
+                      "notes": "نقل صباحي"
+                    }
+                  }
+                },
+                "stable": {
+                  "summary": "حجز إيواء",
+                  "value": {
+                    "type": "stable",
+                    "serviceId": "svc_stable_1",
+                    "startDate": "2026-08-01",
+                    "endDate": "2026-08-05",
+                    "spacesRequested": 1
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "201": { "description": "Created" },
           "400": { "description": "Validation error" },
-          "409": { "description": "Occupancy full for range" }
+          "409": { "description": "Occupancy/capacity conflict (OCCUPANCY_FULL | TRANSPORT_CAPACITY | VET_UNAVAILABLE)" }
         }
       }
     },
     "/bookings/{id}": {
       "patch": {
         "tags": ["bookings"],
-        "summary": "Update booking",
+        "summary": "Update booking status or provider schedule (stable/transport)",
         "security": [{ "bearerAuth": [] }],
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "notes": { "type": "string" } } } } } },
-        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string", "description": "pending→confirmed|cancelled|rejected→in_progress→completed" },
+                  "notes": { "type": "string" },
+                  "bookingDate": { "type": "string", "description": "نقل: إعادة جدولة (مزوّد)" },
+                  "unitsRequested": { "type": "integer", "description": "نقل: وحدات (مزوّد)" },
+                  "origin": { "type": "object" },
+                  "destination": { "type": "object" },
+                  "startDate": { "type": "string", "description": "إيواء" },
+                  "endDate": { "type": "string", "description": "إيواء" },
+                  "spacesRequested": { "type": "integer", "description": "إيواء" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" }, "409": { "description": "Capacity conflict" } }
       }
     },
     "/services": {
@@ -280,15 +344,66 @@
     "/services/{id}/availability": {
       "get": {
         "tags": ["services"],
-        "summary": "Stable occupancy for date range",
+        "summary": "Availability by day (stable occupancy or transport fleet capacity)",
         "parameters": [
           { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "from", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "to", "in": "query", "required": true, "schema": { "type": "string" } }
+          { "name": "from", "in": "query", "required": true, "schema": { "type": "string" }, "description": "YYYY-MM-DD أو ISO" },
+          { "name": "to", "in": "query", "schema": { "type": "string" }, "description": "افتراضي = from (نقل)" },
+          { "name": "date", "in": "query", "schema": { "type": "string" }, "description": "اختصار ليوم واحد" },
+          { "name": "units", "in": "query", "schema": { "type": "integer" }, "description": "نقل: الوحدات المطلوبة" }
         ],
         "responses": {
           "200": { "description": "Availability by day" },
-          "400": { "description": "Invalid range or not stable" },
+          "400": { "description": "Invalid range or unsupported service type" },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/services/{id}/transport-quote": {
+      "post": {
+        "tags": ["services"],
+        "summary": "Estimate transport distance/price before booking",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "origin": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": { "type": "number" },
+                      "longitude": { "type": "number" },
+                      "address": { "type": "string" }
+                    }
+                  },
+                  "destination": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": { "type": "number" },
+                      "longitude": { "type": "number" },
+                      "address": { "type": "string" }
+                    }
+                  },
+                  "unitsRequested": { "type": "integer" },
+                  "bookingDate": { "type": "string" }
+                }
+              },
+              "example": {
+                "origin": { "latitude": 24.7136, "longitude": 46.6753, "address": "الرياض" },
+                "destination": { "latitude": 21.4858, "longitude": 39.1925, "address": "جدة" },
+                "unitsRequested": 2,
+                "bookingDate": "2026-08-01"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Quote with distanceKm, estimatedPrice (if pricing fields set), optional capacity" },
+          "400": { "description": "Missing coordinates or not a transport service" },
           "404": { "description": "Not found" }
         }
       }

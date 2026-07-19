@@ -293,9 +293,97 @@ function normalizeStableBookingPayload(body, service) {
 }
 
 /**
- * تطبيع حجز النقل: ملاحظات أعلى المستند + details مكتملة + عناوين.
+ * دمج نقطة موقع من الجسم أو details (يدعم lat/lng أو latitude/longitude).
  */
-function normalizeTransportationBookingPayload(body) {
+function coalesceGeoPoint(primary, fallback) {
+  const a = primary && typeof primary === 'object' ? primary : null;
+  const b = fallback && typeof fallback === 'object' ? fallback : null;
+  if (!a && !b) return {};
+  const merged = { ...(b || {}), ...(a || {}) };
+  const lat = merged.latitude ?? merged.lat;
+  const lng = merged.longitude ?? merged.lng ?? merged.lon;
+  if (lat != null && merged.latitude == null) merged.latitude = Number(lat);
+  if (lng != null && merged.longitude == null) merged.longitude = Number(lng);
+  return merged;
+}
+
+function hasValidCoordinates(point) {
+  if (!point || typeof point !== 'object') return false;
+  const lat = Number(point.latitude ?? point.lat);
+  const lng = Number(point.longitude ?? point.lng ?? point.lon);
+  return Number.isFinite(lat) && Number.isFinite(lng);
+}
+
+/** مسافة هافرساين بالكيلومتر */
+function haversineKm(origin, destination) {
+  if (!hasValidCoordinates(origin) || !hasValidCoordinates(destination)) {
+    return null;
+  }
+  const lat1 = Number(origin.latitude ?? origin.lat);
+  const lon1 = Number(origin.longitude ?? origin.lng ?? origin.lon);
+  const lat2 = Number(destination.latitude ?? destination.lat);
+  const lon2 = Number(destination.longitude ?? destination.lng ?? destination.lon);
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+}
+
+/**
+ * تقدير سعر النقل إن وُجدت حقول تسعير على الخدمة.
+ * pricePerKm / pricePerUnit / basePrice / minimumPrice
+ */
+function estimateTransportQuote({ service, origin, destination, unitsRequested = 1 }) {
+  const distanceKm = haversineKm(origin, destination);
+  const units = Math.max(1, Math.floor(Number(unitsRequested) || 1));
+  const base = Number(service?.basePrice ?? service?.startingPrice ?? 0);
+  const perKm = Number(service?.pricePerKm ?? service?.ratePerKm ?? 0);
+  const perUnit = Number(service?.pricePerUnit ?? service?.pricePerHead ?? 0);
+  const minimum = Number(service?.minimumPrice ?? service?.minPrice ?? 0);
+
+  let estimatedPrice = null;
+  const hasPricing =
+    (Number.isFinite(base) && base > 0) ||
+    (Number.isFinite(perKm) && perKm > 0) ||
+    (Number.isFinite(perUnit) && perUnit > 0);
+
+  if (hasPricing) {
+    let total = Number.isFinite(base) && base > 0 ? base : 0;
+    if (Number.isFinite(perKm) && perKm > 0 && distanceKm != null) {
+      total += perKm * distanceKm;
+    }
+    if (Number.isFinite(perUnit) && perUnit > 0) {
+      total += perUnit * units;
+    }
+    if (Number.isFinite(minimum) && minimum > 0) {
+      total = Math.max(total, minimum);
+    }
+    estimatedPrice = Math.round(total);
+  }
+
+  return {
+    distanceKm,
+    unitsRequested: units,
+    currency: service?.currency || 'SAR',
+    estimatedPrice,
+    pricingConfigured: hasPricing,
+    breakdown: {
+      basePrice: Number.isFinite(base) && base > 0 ? base : 0,
+      pricePerKm: Number.isFinite(perKm) && perKm > 0 ? perKm : 0,
+      pricePerUnit: Number.isFinite(perUnit) && perUnit > 0 ? perUnit : 0,
+      minimumPrice: Number.isFinite(minimum) && minimum > 0 ? minimum : 0,
+    },
+  };
+}
+
+/**
+ * تطبيع حجز النقل: ملاحظات أعلى المستند + details مكتملة + عناوين + إثراء من الخدمة.
+ */
+function normalizeTransportationBookingPayload(body, service) {
   const src = body && typeof body === 'object' ? body : {};
   const detailsIn =
     src.details && typeof src.details === 'object' ? { ...src.details } : {};
@@ -308,25 +396,53 @@ function normalizeTransportationBookingPayload(body) {
     .trim()
     .toLowerCase();
   const notes = src.notes || detailsIn.notes || '';
-  const serviceName = src.serviceName || detailsIn.serviceName || '';
+  const serviceName =
+    src.serviceName || detailsIn.serviceName || service?.name || '';
 
-  const origin = detailsIn.origin && typeof detailsIn.origin === 'object'
-    ? { ...detailsIn.origin }
-    : {};
-  const destination =
-    detailsIn.destination && typeof detailsIn.destination === 'object'
-      ? { ...detailsIn.destination }
-      : {};
+  const origin = coalesceGeoPoint(src.origin, detailsIn.origin);
+  const destination = coalesceGeoPoint(src.destination, detailsIn.destination);
 
   if (src.originAddress && !origin.address) origin.address = src.originAddress;
   if (src.destinationAddress && !destination.address) {
     destination.address = src.destinationAddress;
   }
 
+  const bookingDate =
+    src.bookingDate ||
+    detailsIn.bookingDate ||
+    src.startDate ||
+    detailsIn.startDate ||
+    null;
+
+  const unitsRequested = Math.max(
+    1,
+    Math.floor(
+      Number(
+        src.unitsRequested ??
+          detailsIn.unitsRequested ??
+          detailsIn.headCount ??
+          src.headCount ??
+          detailsIn.numberOfHorses ??
+          src.numberOfHorses ??
+          detailsIn.birdCount ??
+          src.birdCount ??
+          1,
+      ) || 1,
+    ),
+  );
+
+  const quote = estimateTransportQuote({
+    service,
+    origin,
+    destination,
+    unitsRequested,
+  });
+
   const details = {
     ...detailsIn,
     origin,
     destination,
+    bookingDate,
     customerName,
     customerPhone,
     paymentMethod,
@@ -340,25 +456,118 @@ function normalizeTransportationBookingPayload(body) {
     camelTransportMode: detailsIn.camelTransportMode || src.camelTransportMode,
     falconCarrierType: detailsIn.falconCarrierType || src.falconCarrierType,
     species: detailsIn.species || src.species,
-    unitsRequested:
-      detailsIn.unitsRequested ||
-      src.unitsRequested ||
-      detailsIn.headCount ||
-      detailsIn.numberOfHorses ||
-      detailsIn.birdCount ||
-      1,
+    unitsRequested,
+    distanceKm: quote.distanceKm,
+    estimatedPrice: quote.estimatedPrice,
+    currency: quote.currency,
   };
 
   return {
     ...src,
     type: 'transportation',
     serviceType: 'transportation',
+    serviceId: src.serviceId || service?.id,
+    providerId: src.providerId || service?.providerId,
     customerName,
     customerPhone,
     paymentMethod,
     notes,
     serviceName,
+    bookingDate,
+    startDate: src.startDate || bookingDate,
+    unitsRequested,
+    status: src.status || 'pending',
     details,
+  };
+}
+
+/**
+ * توفر سعة النقل ليوم أو فترة (وحدات/يوم).
+ */
+function buildTransportAvailabilityPayload({
+  service,
+  bookings,
+  from,
+  to,
+  unitsRequested = 1,
+}) {
+  const start = toDayKey(from);
+  const end = toDayKey(to) || start;
+  const capacity = fleetCapacity(service);
+  const need = Math.max(1, Math.floor(Number(unitsRequested) || 1));
+  const days = [];
+
+  if (!start) {
+    return {
+      serviceId: service?.id,
+      type: 'transportation',
+      capacity,
+      from: null,
+      to: null,
+      unitsRequested: need,
+      canBook: false,
+      message: 'تاريخ غير صالح',
+      days: [],
+    };
+  }
+
+  const cur = new Date(`${start}T00:00:00.000Z`);
+  const endD = new Date(`${end}T00:00:00.000Z`);
+  if (Number.isNaN(cur.getTime()) || Number.isNaN(endD.getTime())) {
+    return {
+      serviceId: service?.id,
+      type: 'transportation',
+      capacity,
+      from: start,
+      to: end,
+      unitsRequested: need,
+      canBook: false,
+      message: 'تاريخ غير صالح',
+      days: [],
+    };
+  }
+
+  while (cur <= endD) {
+    const date = cur.toISOString().slice(0, 10);
+    const cap = evaluateTransportCapacity({
+      service,
+      bookings,
+      unitsRequested: need,
+      bookingDate: date,
+    });
+    days.push({
+      date,
+      capacity: cap.capacity,
+      used: cap.used,
+      available: cap.available,
+      canBook: cap.ok,
+    });
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+
+  const bookableDays = days.filter((d) => d.canBook).length;
+  const minAvailable = days.reduce(
+    (min, d) => Math.min(min, d.available),
+    capacity > 0 ? capacity : 0,
+  );
+
+  return {
+    serviceId: service?.id,
+    type: 'transportation',
+    capacity,
+    from: start,
+    to: end,
+    unitsRequested: need,
+    minAvailable,
+    bookableDays,
+    canBook: bookableDays > 0 && capacity > 0,
+    message:
+      capacity <= 0
+        ? 'لا توجد سعة مسجّلة لأسطول هذا الناقل'
+        : bookableDays === 0
+          ? 'لا تتوفر سعة كافية في هذه الفترة'
+          : undefined,
+    days,
   };
 }
 
@@ -613,10 +822,14 @@ module.exports = {
   serviceCapacity,
   fleetCapacity,
   unitsRequestedOf,
+  hasValidCoordinates,
+  haversineKm,
+  estimateTransportQuote,
   evaluateStableOccupancy,
   evaluateTransportCapacity,
   evaluateVetAvailability,
   buildAvailabilityPayload,
+  buildTransportAvailabilityPayload,
   normalizeStableBookingPayload,
   normalizeTransportationBookingPayload,
   canProviderBookingTransition,
