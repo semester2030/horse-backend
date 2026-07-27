@@ -545,19 +545,31 @@ function canCustomerCancelBooking(from) {
  * يغيّر الحجوزات المعلّقة الأقدم من العتبة إلى expired.
  * @returns {number} عدد المحدَّث
  */
-function expireStalePendingBookings(bookingsMap, hours = PENDING_EXPIRE_HOURS) {
+function expireStalePendingBookings(
+  bookingsMap,
+  hours = PENDING_EXPIRE_HOURS,
+  onExpire,
+) {
   const cutoff = Date.now() - Math.max(1, hours) * 3600 * 1000;
   let n = 0;
   for (const [bid, b] of bookingsMap.entries()) {
     if (String(b.status || '') !== 'pending') continue;
     const t = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     if (!t || t > cutoff) continue;
-    bookingsMap.set(bid, {
+    const expired = {
       ...b,
       status: 'expired',
       updatedAt: new Date().toISOString(),
       expiredAt: new Date().toISOString(),
-    });
+    };
+    bookingsMap.set(bid, expired);
+    if (typeof onExpire === 'function') {
+      try {
+        onExpire(expired, b);
+      } catch (_) {
+        /* release hook optional */
+      }
+    }
     n += 1;
   }
   return n;
@@ -626,4 +638,5 @@ module.exports = {
   listingStatusOf,
   canListingStatusTransition,
   isListingPubliclyVisible,
+  bookingDayKey,
 };

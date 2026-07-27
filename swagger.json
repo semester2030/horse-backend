@@ -242,6 +242,208 @@
         "responses": { "200": { "description": "OK" }, "404": { "description": "Not found" } }
       }
     },
+    "/transport-requests": {
+      "post": {
+        "tags": ["transport"],
+        "summary": "Create transport request (T2 provider search context)",
+        "description": "Persists a transport request with status provider_search. Does not assign a provider.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["animalType", "animalCount", "pickup", "destination"],
+                "properties": {
+                  "animalType": { "type": "string", "enum": ["camel", "horse", "falcon"] },
+                  "animalCount": { "type": "integer", "minimum": 1 },
+                  "pickup": { "type": "object", "properties": { "latitude": { "type": "number" }, "longitude": { "type": "number" }, "address": { "type": "string" } } },
+                  "destination": { "type": "object", "properties": { "latitude": { "type": "number" }, "longitude": { "type": "number" }, "address": { "type": "string" } } },
+                  "requestTiming": { "type": "string", "enum": ["immediate", "scheduled"] },
+                  "requestedPickupAt": { "type": "string", "format": "date-time" },
+                  "tripType": { "type": "string", "enum": ["oneWay", "roundTrip"] },
+                  "providerPreference": { "type": "string", "enum": ["any", "individual", "company"] },
+                  "specialRequirements": { "type": "string" },
+                  "idempotencyKey": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created transport request" },
+          "200": { "description": "Idempotent reuse of existing request" },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/transport-requests/{requestId}": {
+      "get": {
+        "tags": ["transport"],
+        "summary": "Get owned transport request",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Transport request context" },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/transport-requests/{requestId}/providers": {
+      "get": {
+        "tags": ["transport"],
+        "summary": "List matched transport providers (T3 Matching Engine)",
+        "description": "Runs Availability + Matching pipeline. Returns only eligible providers ordered by deterministic ranking. Rejected providers are omitted.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": {
+            "description": "Matched providers for map/list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requestId": { "type": "string" },
+                    "generatedAt": { "type": "string", "format": "date-time" },
+                    "matchingStatus": { "type": "string", "enum": ["matched", "no_match"] },
+                    "matchingVersion": { "type": "string", "example": "t3.1" },
+                    "searchRadiusKm": { "type": "number", "nullable": true },
+                    "radiusExpanded": { "type": "boolean" },
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "providerId": { "type": "string" },
+                          "serviceId": { "type": "string" },
+                          "providerType": { "type": "string", "enum": ["individual", "company"] },
+                          "displayName": { "type": "string" },
+                          "latitude": { "type": "number" },
+                          "longitude": { "type": "number" },
+                          "distanceKm": { "type": "number", "nullable": true },
+                          "estimatedArrivalMinutes": { "type": "integer", "nullable": true },
+                          "supportedAnimalTypes": { "type": "array", "items": { "type": "string" } },
+                          "capacity": { "type": "integer", "nullable": true },
+                          "availability": { "type": "string", "enum": ["available", "busy", "offline", "vacation", "maintenance", "unavailable", "unknown"] },
+                          "rating": { "type": "number", "nullable": true },
+                          "verified": { "type": "boolean" },
+                          "matchingReason": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found" }
+        }
+      }
+    },
+    "/transport-requests/{requestId}/negotiation": {
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Open negotiation for transport request (T4)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "201": { "description": "Opened" }, "200": { "description": "Existing" } }
+      },
+      "get": {
+        "tags": ["negotiation"],
+        "summary": "Get negotiation with offers",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Negotiation view" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/transport-requests/{requestId}/offers": {
+      "get": {
+        "tags": ["negotiation"],
+        "summary": "List offers for request",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Offers list" } }
+      },
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Create offer or counter (append-only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amount"],
+                "properties": {
+                  "amount": { "type": "number" },
+                  "currency": { "type": "string" },
+                  "serviceId": { "type": "string" },
+                  "parentOfferId": { "type": "string" },
+                  "note": { "type": "string" },
+                  "ttlMs": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Offer created" } }
+      }
+    },
+    "/transport-requests/{requestId}/cancel": {
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Cancel transport request during negotiation",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Cancelled" }, "409": { "description": "Already converted" } }
+      }
+    },
+    "/offers/{offerId}/counter": {
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Counter an offer",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "offerId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "201": { "description": "Counter created" } }
+      }
+    },
+    "/offers/{offerId}/accept": {
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Atomic accept → Booking (Idempotency-Key supported)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "offerId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "201": { "description": "Booking created" },
+          "200": { "description": "Idempotent reuse" },
+          "409": { "description": "Conflict / expired / double accept" }
+        }
+      }
+    },
+    "/offers/{offerId}/reject": {
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Reject pending offer",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "offerId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Rejected" } }
+      }
+    },
+    "/offers/{offerId}/withdraw": {
+      "post": {
+        "tags": ["negotiation"],
+        "summary": "Provider withdraws pending offer",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "offerId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Withdrawn" } }
+      }
+    },
     "/services": {
       "get": {
         "tags": ["services"],

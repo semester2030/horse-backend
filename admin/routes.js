@@ -668,6 +668,136 @@ function createAdminRouter(ctx) {
     res.json(paginate(list, req.query.page, req.query.limit));
   });
 
+  router.get('/trips', requireAdminAuth, requirePerm('bookings:read'), (req, res) => {
+    if (!ctx.store.trips) ctx.store.trips = new Map();
+    let list = [...ctx.store.trips.values()];
+    if (req.query.status) list = list.filter((t) => t.status === req.query.status);
+    if (req.query.providerId) {
+      list = list.filter((t) => String(t.providerId) === String(req.query.providerId));
+    }
+    list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(paginate(list, req.query.page, req.query.limit));
+  });
+
+  router.get('/trips/:id', requireAdminAuth, requirePerm('bookings:read'), (req, res) => {
+    const journey = require('../journey_engine');
+    journey.ensureStoreMaps(ctx.store);
+    const view = journey.getTripView(ctx.store, req.params.id);
+    if (!view) return res.status(404).json({ message: 'الرحلة غير موجودة' });
+    const tracking = require('../tracking_engine');
+    tracking.ensureStoreMaps(ctx.store);
+    const session = tracking.findSessionByTripId(ctx.store, req.params.id);
+    res.json({
+      ...view,
+      tracking: session
+        ? tracking.getTrackingView(ctx.store, session.id)
+        : null,
+    });
+  });
+
+  router.get(
+    '/trips/:id/tracking',
+    requireAdminAuth,
+    requirePerm('bookings:read'),
+    (req, res) => {
+      const tracking = require('../tracking_engine');
+      tracking.ensureStoreMaps(ctx.store);
+      const session = tracking.findSessionByTripId(ctx.store, req.params.id);
+      if (!session) {
+        return res.status(404).json({ message: 'لا توجد جلسة تتبع' });
+      }
+      res.json(tracking.getTrackingView(ctx.store, session.id));
+    },
+  );
+
+  router.get(
+    '/trips/:id/evidence',
+    requireAdminAuth,
+    requirePerm('bookings:read'),
+    (req, res) => {
+      const ev = require('../evidence_engine');
+      ev.ensureStoreMaps(ctx.store);
+      let rec = ev.findEvidenceByTripId(ctx.store, req.params.id);
+      if (!rec) {
+        return res.status(404).json({ message: 'لا توجد أدلة' });
+      }
+      res.json(ev.getEvidenceView(ctx.store, rec.id));
+    },
+  );
+
+  router.post(
+    '/trips/:id/evidence/complete',
+    requireAdminAuth,
+    requirePerm('bookings:write'),
+    (req, res) => {
+      const ev = require('../evidence_engine');
+      const { logAudit } = require('./audit');
+      ev.ensureStoreMaps(ctx.store);
+      const rec = ev.findEvidenceByTripId(ctx.store, req.params.id);
+      if (!rec) return res.status(404).json({ message: 'لا توجد أدلة' });
+      const result = ev.completeEvidence({
+        store: ctx.store,
+        evidenceId: rec.id,
+        actorUserId: req.adminUser?.id || 'admin',
+        actorRole: 'admin',
+        idFn: ctx.id,
+        note: req.body?.note,
+        adminOverride: req.body?.override === true,
+        auditFn: (entry) =>
+          logAudit(ctx, {
+            ...entry,
+            actorType: 'admin',
+            actorId: req.adminUser?.id,
+            actorName: req.adminUser?.name || req.adminUser?.email || '',
+          }),
+      });
+      if (!result.ok) {
+        return res.status(result.status).json({ message: result.message });
+      }
+      ctx.saveStore();
+      res.json({
+        evidence: ev.sanitizeEvidenceForViewer(result.evidence),
+        reused: !!result.reused,
+      });
+    },
+  );
+
+  router.post(
+    '/trips/:id/transition',
+    requireAdminAuth,
+    requirePerm('bookings:write'),
+    (req, res) => {
+      const journey = require('../journey_engine');
+      const { logAudit } = require('./audit');
+      const result = journey.transitionTrip({
+        store: ctx.store,
+        tripId: req.params.id,
+        toStatus: req.body?.toStatus || req.body?.status,
+        actorUserId: req.adminUser?.id || 'admin',
+        actorRole: 'admin',
+        note: req.body?.note,
+        idFn: ctx.id,
+        adminOverride: req.body?.override === true,
+        auditFn: (entry) =>
+          logAudit(ctx, {
+            ...entry,
+            actorType: 'admin',
+            actorId: req.adminUser?.id,
+            actorName: req.adminUser?.name || req.adminUser?.email || '',
+          }),
+      });
+      if (!result.ok) {
+        return res.status(result.status).json({
+          message: result.message,
+          from: result.from,
+          to: result.to,
+        });
+      }
+      ctx.saveStore();
+      res.json({ trip: result.trip, reused: !!result.reused });
+    },
+  );
+
   router.patch('/bookings/:id', requireAdminAuth, requirePerm('bookings:write'), (req, res) => {
     const b = ctx.store.bookings.get(req.params.id);
     if (!b) return res.status(404).json({ message: 'الحجز غير موجود' });

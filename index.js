@@ -41,6 +41,18 @@ const {
   ensureModerationStore,
 } = require('./content_moderation');
 const bookingOccupancy = require('./booking_occupancy');
+const verticalTxnPrimitives = require('./vertical_txn_primitives');
+const verticalFeedStock = require('./vertical_feed_stock');
+const verticalEquipmentRental = require('./vertical_equipment_rental');
+const verticalTrainingCapacity = require('./vertical_training_capacity');
+const verticalTxnRelease = require('./vertical_txn_release');
+const transportRequestsApi = require('./transport_requests');
+const { registerNegotiationRoutes } = require('./negotiation_routes');
+const { registerJourneyRoutes } = require('./journey_routes');
+const { registerTrackingRoutes } = require('./tracking_routes');
+const { registerEvidenceRoutes } = require('./evidence_routes');
+const { registerGeoDiscoveryRoutes } = require('./geo_discovery');
+const { createWsHub } = require('./ws_hub');
 const marketplaceCommerce = require('./marketplace_commerce');
 const opsNotify = require('./ops_notify');
 
@@ -119,6 +131,24 @@ const store = {
   horses: new Map(),
   favorites: new Map(),
   bookings: new Map(),
+  /** طلبات نقل قبل اختيار مقدم (T2) — منفصلة عن bookings */
+  transportRequests: new Map(),
+  /** T4 Negotiation */
+  negotiations: new Map(),
+  offers: new Map(),
+  negotiationEvents: [],
+  /** T5A Journey */
+  trips: new Map(),
+  tripEvents: [],
+  drivers: new Map(),
+  vehicles: new Map(),
+  /** T5B Tracking */
+  trackingSessions: new Map(),
+  trackingHistory: [],
+  trackingEvents: [],
+  /** T5C Evidence / POD */
+  evidenceRecords: new Map(),
+  evidenceEvents: [],
   services: new Map(),
   /** منتجات الكتالوج — category: feed | supplies | equipment */
   catalogItems: new Map(),
@@ -139,6 +169,8 @@ const store = {
   adminUsers: new Map(),
   /** سجل تدقيق */
   auditEvents: [],
+  /** Idempotency keys for booking creates — userId::key → { bookingId, ... } */
+  idempotencyKeys: new Map(),
   /** مقاييس API */
   apiMetrics: { routes: {}, recent: [] },
   /** خبراء معتمدون */
@@ -149,6 +181,8 @@ const store = {
   expertRatings: new Map(),
   /** اهتمامات تواصل أعلاف/معدات — id → lead */
   contactLeads: new Map(),
+  /** GDE-02 Geo Discovery — ServicePlace index (generic; no vertical booking logic) */
+  servicePlaces: new Map(),
 };
 
 /** رموز OTP وإعداد الحساب (ذاكرة — تُعاد إرسالها عند الحاجة) */
@@ -180,6 +214,62 @@ function applyStoreSnapshot(data, sourceLabel) {
   }
   if (data.bookings && typeof data.bookings === 'object') {
     store.bookings = new Map(Object.entries(data.bookings));
+  }
+  if (data.transportRequests && typeof data.transportRequests === 'object') {
+    store.transportRequests = new Map(Object.entries(data.transportRequests));
+  }
+  if (data.negotiations && typeof data.negotiations === 'object') {
+    store.negotiations = new Map(Object.entries(data.negotiations));
+  } else {
+    store.negotiations = new Map();
+  }
+  if (data.offers && typeof data.offers === 'object') {
+    store.offers = new Map(Object.entries(data.offers));
+  } else {
+    store.offers = new Map();
+  }
+  store.negotiationEvents = Array.isArray(data.negotiationEvents)
+    ? data.negotiationEvents
+    : [];
+  if (data.trips && typeof data.trips === 'object') {
+    store.trips = new Map(Object.entries(data.trips));
+  } else {
+    store.trips = new Map();
+  }
+  store.tripEvents = Array.isArray(data.tripEvents) ? data.tripEvents : [];
+  if (data.drivers && typeof data.drivers === 'object') {
+    store.drivers = new Map(Object.entries(data.drivers));
+  } else {
+    store.drivers = new Map();
+  }
+  if (data.vehicles && typeof data.vehicles === 'object') {
+    store.vehicles = new Map(Object.entries(data.vehicles));
+  } else {
+    store.vehicles = new Map();
+  }
+  if (data.trackingSessions && typeof data.trackingSessions === 'object') {
+    store.trackingSessions = new Map(Object.entries(data.trackingSessions));
+  } else {
+    store.trackingSessions = new Map();
+  }
+  store.trackingHistory = Array.isArray(data.trackingHistory)
+    ? data.trackingHistory
+    : [];
+  store.trackingEvents = Array.isArray(data.trackingEvents)
+    ? data.trackingEvents
+    : [];
+  if (data.evidenceRecords && typeof data.evidenceRecords === 'object') {
+    store.evidenceRecords = new Map(Object.entries(data.evidenceRecords));
+  } else {
+    store.evidenceRecords = new Map();
+  }
+  store.evidenceEvents = Array.isArray(data.evidenceEvents)
+    ? data.evidenceEvents
+    : [];
+  if (data.servicePlaces && typeof data.servicePlaces === 'object') {
+    store.servicePlaces = new Map(Object.entries(data.servicePlaces));
+  } else {
+    store.servicePlaces = new Map();
   }
   if (data.services && typeof data.services === 'object') {
     store.services = new Map(Object.entries(data.services));
@@ -228,6 +318,11 @@ function applyStoreSnapshot(data, sourceLabel) {
     store.auditEvents = data.auditEvents;
   } else {
     store.auditEvents = [];
+  }
+  if (data.idempotencyKeys && typeof data.idempotencyKeys === 'object') {
+    store.idempotencyKeys = new Map(Object.entries(data.idempotencyKeys));
+  } else {
+    store.idempotencyKeys = new Map();
   }
   if (data.apiMetrics && typeof data.apiMetrics === 'object') {
     store.apiMetrics = data.apiMetrics;
@@ -278,6 +373,20 @@ function saveStore() {
       horses: Object.fromEntries(store.horses),
       favorites: Object.fromEntries(store.favorites),
       bookings: Object.fromEntries(store.bookings),
+      transportRequests: Object.fromEntries(store.transportRequests || []),
+      negotiations: Object.fromEntries(store.negotiations || []),
+      offers: Object.fromEntries(store.offers || []),
+      negotiationEvents: store.negotiationEvents || [],
+      trips: Object.fromEntries(store.trips || []),
+      tripEvents: store.tripEvents || [],
+      drivers: Object.fromEntries(store.drivers || []),
+      vehicles: Object.fromEntries(store.vehicles || []),
+      trackingSessions: Object.fromEntries(store.trackingSessions || []),
+      trackingHistory: store.trackingHistory || [],
+      trackingEvents: store.trackingEvents || [],
+      evidenceRecords: Object.fromEntries(store.evidenceRecords || []),
+      evidenceEvents: store.evidenceEvents || [],
+      servicePlaces: Object.fromEntries(store.servicePlaces || []),
       services: Object.fromEntries(store.services),
       catalogItems: Object.fromEntries(store.catalogItems),
       carts: Object.fromEntries(store.carts),
@@ -288,6 +397,7 @@ function saveStore() {
       accessTokens: Object.fromEntries(store.accessTokens),
       adminUsers: Object.fromEntries(store.adminUsers),
       auditEvents: store.auditEvents,
+      idempotencyKeys: Object.fromEntries(store.idempotencyKeys || []),
       apiMetrics: store.apiMetrics,
       contentReports: store.contentReports,
       experts: Object.fromEntries(store.experts),
@@ -324,7 +434,15 @@ function notifyEvent(userId, title, body, meta) {
 
 function runLazyExpiry() {
   let dirty = false;
-  if (bookingOccupancy.expireStalePendingBookings(store.bookings) > 0) {
+  if (
+    bookingOccupancy.expireStalePendingBookings(
+      store.bookings,
+      undefined,
+      (expired) => {
+        verticalTxnRelease.releaseVerticalReservations(store, expired);
+      },
+    ) > 0
+  ) {
     dirty = true;
   }
   if (
@@ -1092,6 +1210,22 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
   let payload = { ...body };
   const serviceId = String(body.serviceId || '').trim();
 
+  // Shared technical: idempotency (not a unified booking engine)
+  const idemKey = verticalTxnPrimitives.readIdempotencyKey(req, body);
+  if (idemKey) {
+    const hit = verticalTxnPrimitives.idempotencyLookup(
+      store,
+      req.authUserId,
+      idemKey,
+    );
+    if (hit?.bookingId) {
+      const existingBooking = store.bookings.get(String(hit.bookingId));
+      if (existingBooking) {
+        return res.status(200).json(existingBooking);
+      }
+    }
+  }
+
   if (kind === 'stable') {
     if (!serviceId) {
       return res.status(400).json({ message: 'serviceId مطلوب لحجز الإيواء' });
@@ -1221,6 +1355,170 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
         message: vetCheck.message || 'الموعد غير متاح',
       });
     }
+  } else if (kind === 'feed' || kind === 'nutrition' || kind === 'forage') {
+    // Feed = product sale (Order), not a rental booking engine
+    if (!serviceId) {
+      return res.status(400).json({ message: 'serviceId مطلوب لطلب الأعلاف' });
+    }
+    const service = store.services.get(serviceId);
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة الأعلاف غير موجودة' });
+    }
+    payload.type = 'feed';
+    payload.serviceType = 'feed';
+    payload.serviceId = serviceId;
+    payload.providerId = payload.providerId || service.providerId;
+    payload.transactionKind = 'order';
+    const details =
+      payload.details && typeof payload.details === 'object'
+        ? { ...payload.details }
+        : {};
+    const productId = String(
+      details.productId || payload.productId || '',
+    ).trim();
+    const quantity = Math.floor(
+      Number(details.quantity ?? payload.quantity ?? 0),
+    );
+    if (!productId) {
+      return res.status(400).json({ message: 'productId مطلوب لطلب الأعلاف' });
+    }
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      return res.status(400).json({ message: 'كمية غير صالحة' });
+    }
+    details.productId = productId;
+    details.quantity = quantity;
+    details.transactionKind = 'order';
+    payload.details = details;
+    payload.quantity = quantity;
+    const stock = verticalFeedStock.reserveFeedStock({
+      service,
+      productId,
+      quantity,
+    });
+    if (!stock.ok) {
+      return res.status(409).json({
+        code: stock.code || 'OUT_OF_STOCK',
+        message: stock.message || 'المخزون غير كافٍ',
+        available: stock.available,
+      });
+    }
+    payload.stockDeducted = true;
+    payload.stockReserved = true;
+    payload.stockReservedQty = stock.reserved;
+    store.services.set(serviceId, service);
+    try {
+      const { syncServiceToPlaces } = require('./geo_discovery/adapters/vertical_place_adapter');
+      syncServiceToPlaces(store, service);
+    } catch (_) {
+      /* place sync optional */
+    }
+  } else if (kind === 'equipment' || kind === 'rental') {
+    // Equipment: Sale | Rental | Sale-or-Rental — rental gates only when renting
+    if (!serviceId) {
+      return res.status(400).json({
+        message: 'serviceId مطلوب لطلب المعدات',
+      });
+    }
+    const service = store.services.get(serviceId);
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة المعدات غير موجودة' });
+    }
+    payload.type = kind === 'rental' ? 'equipment' : 'equipment';
+    payload.serviceType = 'equipment';
+    payload.serviceId = serviceId;
+    payload.providerId = payload.providerId || service.providerId;
+    const details =
+      payload.details && typeof payload.details === 'object'
+        ? { ...payload.details }
+        : {};
+    const equipmentId = String(
+      details.equipmentId || payload.equipmentId || '',
+    ).trim();
+    if (!equipmentId) {
+      return res.status(400).json({ message: 'equipmentId مطلوب' });
+    }
+    const startDate =
+      payload.startDate || details.startDate || payload.bookingDate;
+    const endDate = payload.endDate || details.endDate || startDate;
+    const quantity = Math.floor(
+      Number(details.quantity ?? payload.quantity ?? 1),
+    );
+    details.equipmentId = equipmentId;
+    details.quantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+    if (startDate) {
+      details.startDate = startDate;
+      payload.startDate = startDate;
+    }
+    if (endDate) {
+      details.endDate = endDate;
+      payload.endDate = endDate;
+    }
+    payload.details = details;
+    const gate = verticalEquipmentRental.evaluateAndAuthorizeEquipmentRental({
+      service,
+      bookings: [...store.bookings.values()],
+      equipmentId,
+      startDate,
+      endDate,
+      quantity: details.quantity,
+      body: { ...body, details },
+    });
+    if (!gate.ok) {
+      return res.status(409).json({
+        code: gate.code || 'RENTAL_CONFLICT',
+        message: gate.message || 'الفترة غير متاحة',
+        capacity: gate.capacity,
+        used: gate.used,
+      });
+    }
+    payload.transactionKind = gate.transactionKind || 'rental';
+    payload.commercialMode = gate.commercialMode;
+    details.transactionKind = payload.transactionKind;
+    details.commercialMode = gate.commercialMode;
+    payload.details = details;
+    if (payload.transactionKind === 'sale') {
+      // Sale order — not a rental booking; clear rental-only semantics
+      payload.rental = false;
+      details.fulfillment = 'sale';
+    } else {
+      payload.rental = true;
+      details.fulfillment = 'rental';
+    }
+  } else if (kind === 'training' || kind === 'trainer') {
+    if (!serviceId) {
+      return res.status(400).json({ message: 'serviceId مطلوب لحجز التدريب' });
+    }
+    const service = store.services.get(serviceId);
+    if (!service) {
+      return res.status(404).json({ message: 'خدمة التدريب غير موجودة' });
+    }
+    payload.type = 'training';
+    payload.serviceType = 'training';
+    payload.serviceId = serviceId;
+    payload.providerId = payload.providerId || service.providerId;
+    payload.transactionKind = 'booking';
+    const details =
+      payload.details && typeof payload.details === 'object'
+        ? { ...payload.details }
+        : {};
+    const programId = String(
+      details.programId || payload.programId || '',
+    ).trim();
+    if (programId) details.programId = programId;
+    payload.details = details;
+    const cap = verticalTrainingCapacity.evaluateTrainingCapacity({
+      service,
+      bookings: [...store.bookings.values()],
+      programId,
+    });
+    if (!cap.ok) {
+      return res.status(409).json({
+        code: cap.code || 'CAPACITY_FULL',
+        message: cap.message || 'لا توجد مقاعد متاحة حاليًا',
+        capacity: cap.capacity,
+        used: cap.used,
+      });
+    }
   }
 
   const bookingId = id();
@@ -1234,6 +1532,22 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
     updatedAt: now,
   };
   store.bookings.set(bookingId, booking);
+  if (idemKey) {
+    verticalTxnPrimitives.idempotencyRemember(
+      store,
+      req.authUserId,
+      idemKey,
+      bookingId,
+    );
+  }
+  verticalTxnPrimitives.appendAudit(store, id, {
+    actorUserId: req.authUserId,
+    action: 'booking.create',
+    targetType: 'booking',
+    targetId: bookingId,
+    serviceType: booking.serviceType || booking.type,
+    transactionKind: booking.transactionKind || null,
+  });
   if (booking.providerId) {
     notifyEvent(
       booking.providerId,
@@ -1352,6 +1666,35 @@ app.patch('/bookings/:id', auth, requireSessionUser, (req, res) => {
 
   store.bookings.set(id, updated);
 
+  if (
+    nextStatus &&
+    nextStatus !== prevStatus &&
+    verticalTxnPrimitives.isTerminalReleaseStatus(nextStatus) &&
+    !verticalTxnPrimitives.isTerminalReleaseStatus(prevStatus)
+  ) {
+    verticalTxnRelease.releaseVerticalReservations(store, updated);
+    store.bookings.set(id, updated);
+    const svcId = String(updated.serviceId || '');
+    if (svcId && store.services.has(svcId)) {
+      try {
+        const {
+          syncServiceToPlaces,
+        } = require('./geo_discovery/adapters/vertical_place_adapter');
+        syncServiceToPlaces(store, store.services.get(svcId));
+      } catch (_) {
+        /* optional */
+      }
+    }
+    verticalTxnPrimitives.appendAudit(store, null, {
+      actorUserId: req.authUserId,
+      action: 'booking.release',
+      targetType: 'booking',
+      targetId: id,
+      from: prevStatus,
+      to: nextStatus,
+    });
+  }
+
   if (nextStatus && nextStatus !== prevStatus) {
     if (isProvider && existing.userId) {
       notifyEvent(
@@ -1374,6 +1717,135 @@ app.patch('/bookings/:id', auth, requireSessionUser, (req, res) => {
   saveStore();
   res.json(updated);
 });
+
+// ========== Transport requests (T2 — قبل اختيار مقدم) ==========
+app.post('/transport-requests', auth, requireSessionUser, (req, res) => {
+  if (!store.transportRequests) store.transportRequests = new Map();
+  const now = new Date().toISOString();
+  const result = transportRequestsApi.createTransportRequest({
+    store,
+    userId: req.authUserId,
+    body: req.body,
+    idFn: id,
+    nowIso: now,
+  });
+  if (!result.ok) {
+    return res.status(result.status).json({ message: result.message });
+  }
+  if (!result.reused) {
+    try {
+      store.auditEvents = store.auditEvents || [];
+      store.auditEvents.unshift({
+        id: id(),
+        at: now,
+        actorUserId: req.authUserId,
+        action: 'transport_request.create',
+        targetType: 'transport_request',
+        targetId: result.request.id,
+      });
+      if (store.auditEvents.length > 2000) store.auditEvents.length = 2000;
+    } catch (_) {
+      /* audit optional */
+    }
+    saveStore();
+  }
+  res.status(result.reused ? 200 : 201).json(result.request);
+});
+
+app.get('/transport-requests/:requestId', auth, requireSessionUser, (req, res) => {
+  if (!store.transportRequests) store.transportRequests = new Map();
+  const owned = transportRequestsApi.getOwnedRequest(
+    store,
+    req.params.requestId,
+    req.authUserId,
+  );
+  if (owned.status) {
+    return res.status(owned.status).json({ message: owned.message });
+  }
+  res.json(owned.request);
+});
+
+app.get(
+  '/transport-requests/:requestId/providers',
+  auth,
+  requireSessionUser,
+  (req, res) => {
+    if (!store.transportRequests) store.transportRequests = new Map();
+    const owned = transportRequestsApi.getOwnedRequest(
+      store,
+      req.params.requestId,
+      req.authUserId,
+    );
+    if (owned.status) {
+      return res.status(owned.status).json({ message: owned.message });
+    }
+    const payload = transportRequestsApi.listProvidersForRequest(
+      store,
+      owned.request,
+    );
+    res.json(payload);
+  },
+);
+
+const wsHub = createWsHub({
+  resolveUserFromToken(token) {
+    if (!token) return null;
+    const entry = store.accessTokens.get(String(token));
+    if (!entry?.userId) return null;
+    const raw = store.users.get(String(entry.userId));
+    if (!raw) return null;
+    return roles.migrateLegacyUser({ ...raw });
+  },
+});
+
+registerNegotiationRoutes(app, {
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+  wsHub,
+  notifyEvent,
+});
+
+registerJourneyRoutes(app, {
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+  wsHub,
+  notifyEvent,
+});
+
+registerTrackingRoutes(app, {
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+  wsHub,
+  notifyEvent,
+});
+
+registerEvidenceRoutes(app, {
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+  wsHub,
+  notifyEvent,
+});
+
+const geoDiscoveryApi = registerGeoDiscoveryRoutes(app, {
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+});
+const syncStableServiceToPlaces = geoDiscoveryApi.syncStableServiceToPlaces;
 
 // ========== Services ==========
 // GET /services بدون auth — تصفح الزائر قبل التسجيل
@@ -1438,6 +1910,11 @@ app.post('/services', auth, requireSessionUser, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   store.services.set(serviceId, service);
+  try {
+    syncStableServiceToPlaces(store, service);
+  } catch (_) {
+    /* geo index best-effort */
+  }
   saveStore();
   res.status(201).json(service);
 });
@@ -1457,6 +1934,11 @@ app.patch('/services/:id', auth, requireSessionUser, (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   store.services.set(id, updated);
+  try {
+    syncStableServiceToPlaces(store, updated);
+  } catch (_) {
+    /* geo index best-effort */
+  }
   saveStore();
   res.json(updated);
 });
@@ -2810,6 +3292,20 @@ app.get('/admin/data', requireAdmin, (req, res) => {
     horses: Object.fromEntries(store.horses),
     favorites: Object.fromEntries(store.favorites),
     bookings: Object.fromEntries(store.bookings),
+    transportRequests: Object.fromEntries(store.transportRequests || []),
+    negotiations: Object.fromEntries(store.negotiations || []),
+    offers: Object.fromEntries(store.offers || []),
+    negotiationEvents: store.negotiationEvents || [],
+    trips: Object.fromEntries(store.trips || []),
+    tripEvents: store.tripEvents || [],
+    drivers: Object.fromEntries(store.drivers || []),
+    vehicles: Object.fromEntries(store.vehicles || []),
+    trackingSessions: Object.fromEntries(store.trackingSessions || []),
+    trackingHistory: store.trackingHistory || [],
+    trackingEvents: store.trackingEvents || [],
+    evidenceRecords: Object.fromEntries(store.evidenceRecords || []),
+    evidenceEvents: store.evidenceEvents || [],
+    servicePlaces: Object.fromEntries(store.servicePlaces || []),
     services: Object.fromEntries(store.services),
     catalogItems: Object.fromEntries(store.catalogItems),
     carts: Object.fromEntries(store.carts),
@@ -3068,8 +3564,19 @@ app.get('/media/stream/:videoId', auth, async (req, res) => {
 // ========== تشغيل الخادم ==========
 // استماع على 0.0.0.0 ليقبل اتصالات من الجهاز الفعلي (iPhone/Android) على نفس الشبكة
 const HOST = process.env.HOST || '0.0.0.0';
-app.listen(PORT, HOST, () => {
+const http = require('http');
+const server = http.createServer(app);
+server.on('upgrade', (req, socket, head) => {
+  try {
+    wsHub.handleUpgrade(req, socket, head);
+  } catch (e) {
+    console.error('[ws] upgrade error', e.message);
+    socket.destroy();
+  }
+});
+server.listen(PORT, HOST, () => {
   console.log(`باك اند العاديات يعمل على http://localhost:${PORT}`);
+  console.log(`WebSocket: ws://localhost:${PORT}/ws?token=…`);
   console.log(`للجهاز الفعلي على نفس الواي فاي: http://horse-backend.local:${PORT} (mDNS)`);
   console.log(`توثيق API (Swagger): http://localhost:${PORT}/api-docs`);
   const sms = smsOtp.status();
