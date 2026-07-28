@@ -1226,13 +1226,16 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
     }
   }
 
-  if (kind === 'stable') {
+  if (kind === 'stable' || kind === 'boarding') {
     if (!serviceId) {
       return res.status(400).json({ message: 'serviceId مطلوب لحجز الإيواء' });
     }
     const service = store.services.get(serviceId);
     if (!service) {
       return res.status(404).json({ message: 'خدمة الإيواء غير موجودة' });
+    }
+    if (!bookingOccupancy.isStableService(service)) {
+      return res.status(400).json({ message: 'الخدمة ليست مرفق إيواء' });
     }
     payload = bookingOccupancy.normalizeStableBookingPayload(body, service);
     if (!payload.startDate || !payload.endDate) {
@@ -1249,18 +1252,23 @@ app.post('/bookings', auth, requireSessionUser, (req, res) => {
       });
     }
 
-    const occupancy = bookingOccupancy.evaluateStableOccupancy({
-      service,
-      bookings: [...store.bookings.values()],
-      startDate: payload.startDate,
-      endDate: payload.endDate,
-      spacesRequested: payload.spacesRequested,
-    });
+    const occupancy = verticalTxnPrimitives.withLock(
+      `stable-occupancy:${serviceId}`,
+      () =>
+        bookingOccupancy.evaluateStableOccupancy({
+          service,
+          bookings: [...store.bookings.values()],
+          startDate: payload.startDate,
+          endDate: payload.endDate,
+          spacesRequested: payload.spacesRequested,
+        }),
+    );
     if (!occupancy.ok) {
       return res.status(409).json({
         code: 'OCCUPANCY_FULL',
         message: occupancy.message || 'الفترة غير متاحة',
         totalSpaces: occupancy.totalSpaces,
+        availableSpaces: occupancy.minAvailable,
         minAvailable: occupancy.minAvailable,
         peakUsed: occupancy.peakUsed,
         days: occupancy.days,
@@ -1640,18 +1648,25 @@ app.patch('/bookings/:id', auth, requireSessionUser, (req, res) => {
       { ...updated, ...body },
       service,
     );
-    const occupancy = bookingOccupancy.evaluateStableOccupancy({
-      service,
-      bookings: [...store.bookings.values()],
-      startDate: merged.startDate,
-      endDate: merged.endDate,
-      spacesRequested: merged.spacesRequested,
-      excludeBookingId: id,
-    });
+    const occupancy = verticalTxnPrimitives.withLock(
+      `stable-occupancy:${String(updated.serviceId || '')}`,
+      () =>
+        bookingOccupancy.evaluateStableOccupancy({
+          service,
+          bookings: [...store.bookings.values()],
+          startDate: merged.startDate,
+          endDate: merged.endDate,
+          spacesRequested: merged.spacesRequested,
+          excludeBookingId: id,
+        }),
+    );
     if (!occupancy.ok) {
       return res.status(409).json({
         code: 'OCCUPANCY_FULL',
         message: occupancy.message || 'الفترة غير متاحة',
+        totalSpaces: occupancy.totalSpaces,
+        availableSpaces: occupancy.minAvailable,
+        minAvailable: occupancy.minAvailable,
         days: occupancy.days,
       });
     }
@@ -1872,10 +1887,7 @@ app.get('/services/:id/availability', (req, res) => {
   if (!service) {
     return res.status(404).json({ message: 'الخدمة غير موجودة' });
   }
-  const kind = String(service.type || service.serviceType || '')
-    .trim()
-    .toLowerCase();
-  if (kind !== 'stable') {
+  if (!bookingOccupancy.isStableService(service)) {
     return res.status(400).json({ message: 'التوفر اليومي متاح لخدمات الإيواء فقط' });
   }
   const from = String(req.query.from || '').trim();

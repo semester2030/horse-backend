@@ -7,6 +7,14 @@
 
 const BLOCKING_STATUSES = new Set(['pending', 'confirmed', 'in_progress']);
 
+/** حالات تحرر السعة تلقائيًا (لا تُحتسب في الإشغال). */
+const FREEING_STATUSES = new Set([
+  'cancelled',
+  'rejected',
+  'completed',
+  'expired',
+]);
+
 /** مزوّد */
 const PROVIDER_BOOKING_TRANSITIONS = {
   pending: ['confirmed', 'cancelled', 'rejected'],
@@ -38,7 +46,15 @@ function bookingKind(booking) {
 }
 
 function isStableBooking(booking) {
-  return bookingKind(booking) === 'stable';
+  const k = bookingKind(booking);
+  return k === 'stable' || k === 'boarding';
+}
+
+function isStableService(service) {
+  const k = String(service?.type || service?.serviceType || '')
+    .trim()
+    .toLowerCase();
+  return k === 'stable' || k === 'boarding';
 }
 
 function toDayKey(value) {
@@ -201,16 +217,26 @@ function buildAvailabilityPayload({ service, bookings, from, to }) {
     endDate: to,
     spacesRequested: 1,
   });
+  const fullDays = result.days
+    .filter((d) => d.available <= 0)
+    .map((d) => d.date);
+  const availableDays = result.days
+    .filter((d) => d.available > 0)
+    .map((d) => d.date);
   return {
     serviceId: service?.id,
     totalSpaces: result.totalSpaces,
+    /** الحد الأدنى المتاح عبر الفترة (سعة متبقية للحجز الجديد بمكان واحد). */
+    availableSpaces: result.minAvailable,
+    minAvailable: result.minAvailable,
     from: toDayKey(from),
     to: toDayKey(to),
-    minAvailable: result.minAvailable,
     peakUsed: result.peakUsed,
     canBook: result.ok && result.totalSpaces > 0,
     message: result.message,
     days: result.days,
+    fullDays,
+    availableDays,
   };
 }
 
@@ -614,10 +640,12 @@ function isListingPubliclyVisible(listing) {
 
 module.exports = {
   BLOCKING_STATUSES,
+  FREEING_STATUSES,
   PROVIDER_BOOKING_TRANSITIONS,
   PENDING_EXPIRE_HOURS,
   EXPERT_REQUEST_EXPIRE_HOURS,
   isStableBooking,
+  isStableService,
   isTransportBooking,
   isVetBooking,
   stayDayKeys,

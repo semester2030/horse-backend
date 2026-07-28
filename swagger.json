@@ -489,8 +489,10 @@
           { "name": "to", "in": "query", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": { "description": "Availability by day" },
-          "400": { "description": "Invalid range or not stable" },
+          "200": {
+            "description": "Boarding occupancy: totalSpaces, availableSpaces (min across range), fullDays[], availableDays[], days[{date,used,available}], canBook"
+          },
+          "400": { "description": "Invalid range or not stable/boarding" },
           "404": { "description": "Not found" }
         }
       }
