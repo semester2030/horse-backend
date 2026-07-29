@@ -78,10 +78,30 @@ function upsertServicePlace(store, raw, idFn) {
   return { ok: true, place: normalizeServicePlace(record) };
 }
 
+/** Remove places linked to a service id (boarding + vertical place ids). */
+function removePlacesForServiceId(store, serviceId) {
+  const map = ensureServicePlaces(store);
+  const sid = String(serviceId || '');
+  if (!sid) return { removed: 0 };
+  let removed = 0;
+  for (const [id, raw] of [...map.entries()]) {
+    if (
+      String(raw.sourceServiceId || '') === sid ||
+      id === `place_boarding_${sid}` ||
+      id.startsWith(`place_`) && id.endsWith(`_${sid}`)
+    ) {
+      map.delete(id);
+      removed += 1;
+    }
+  }
+  return { removed };
+}
+
 module.exports = {
   ensureServicePlaces,
   listNormalizedPlaces,
   queryPlacesInViewport,
   getPlaceById,
   upsertServicePlace,
+  removePlacesForServiceId,
 };

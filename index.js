@@ -1861,6 +1861,36 @@ const geoDiscoveryApi = registerGeoDiscoveryRoutes(app, {
   requireSessionUser,
 });
 const syncStableServiceToPlaces = geoDiscoveryApi.syncStableServiceToPlaces;
+const syncCatalogItemToPlaces = geoDiscoveryApi.syncCatalogItemToPlaces;
+const removeCatalogItemPlace = geoDiscoveryApi.removeCatalogItemPlace;
+
+/** Always re-index services → map places after boot / restore. */
+function indexServiceOnMap(service) {
+  try {
+    const result = syncStableServiceToPlaces(store, service);
+    geoDiscoveryApi.bumpCache();
+    return result;
+  } catch (err) {
+    console.error('[geo] indexServiceOnMap failed:', err && err.message ? err.message : err);
+    return { ok: false, error: true };
+  }
+}
+
+function rebuildGeoDiscoveryIndex({ persist = true } = {}) {
+  try {
+    const out = geoDiscoveryApi.rebuildGeoIndex();
+    if (persist) saveStore();
+    console.log(
+      `[geo] rebuild places=${out.places} boarding=${out.boarding} other=${out.other} catalog=${out.catalog}`,
+    );
+    return out;
+  } catch (err) {
+    console.error('[geo] rebuild failed:', err && err.message ? err.message : err);
+    return { ok: false };
+  }
+}
+
+rebuildGeoDiscoveryIndex({ persist: true });
 
 // ========== Services ==========
 // GET /services بدون auth — تصفح الزائر قبل التسجيل
@@ -1922,13 +1952,12 @@ app.post('/services', auth, requireSessionUser, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   store.services.set(serviceId, service);
-  try {
-    syncStableServiceToPlaces(store, service);
-  } catch (_) {
-    /* geo index best-effort */
-  }
+  const geo = indexServiceOnMap(service);
   saveStore();
-  res.status(201).json(service);
+  res.status(201).json({
+    ...service,
+    geoIndexed: Boolean(geo && geo.ok),
+  });
 });
 
 app.patch('/services/:id', auth, requireSessionUser, (req, res) => {
@@ -1946,13 +1975,9 @@ app.patch('/services/:id', auth, requireSessionUser, (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   store.services.set(id, updated);
-  try {
-    syncStableServiceToPlaces(store, updated);
-  } catch (_) {
-    /* geo index best-effort */
-  }
+  const geo = indexServiceOnMap(updated);
   saveStore();
-  res.json(updated);
+  res.json({ ...updated, geoIndexed: Boolean(geo && geo.ok) });
 });
 
 app.delete('/services/:id', auth, requireSessionUser, (req, res) => {
@@ -1963,6 +1988,12 @@ app.delete('/services/:id', auth, requireSessionUser, (req, res) => {
     return res.status(403).json({ message: 'غير مصرح بحذف هذه الخدمة' });
   }
   store.services.delete(id);
+  try {
+    geoDiscoveryApi.removePlacesForServiceId(id);
+    geoDiscoveryApi.bumpCache();
+  } catch (_) {
+    /* ignore */
+  }
   saveStore();
   res.status(200).send();
 });
@@ -2128,6 +2159,12 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
   };
   marketplaceCommerce.syncInStockFlag(item);
   store.catalogItems.set(itemId, item);
+  try {
+    syncCatalogItemToPlaces(store, item);
+    geoDiscoveryApi.bumpCache();
+  } catch (_) {
+    /* geo index best-effort */
+  }
   saveStore();
   res.status(201).json(item);
 });
@@ -2180,6 +2217,16 @@ app.patch('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
   }
   marketplaceCommerce.syncInStockFlag(updated);
   store.catalogItems.set(id, updated);
+  try {
+    if (String(updated.status || 'active') === 'inactive') {
+      removeCatalogItemPlace(store, id);
+    } else {
+      syncCatalogItemToPlaces(store, updated);
+    }
+    geoDiscoveryApi.bumpCache();
+  } catch (_) {
+    /* geo index best-effort */
+  }
   saveStore();
   res.json(updated);
 });
@@ -2192,6 +2239,12 @@ app.delete('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
     return res.status(403).json({ message: 'غير مصرح بحذف هذا المنتج' });
   }
   store.catalogItems.delete(id);
+  try {
+    removeCatalogItemPlace(store, id);
+    geoDiscoveryApi.bumpCache();
+  } catch (_) {
+    /* ignore */
+  }
   saveStore();
   res.status(200).json({ ok: true });
 });

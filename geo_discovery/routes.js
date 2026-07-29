@@ -13,6 +13,12 @@ const {
   syncServiceToPlaces,
   syncAllCategorizedServices,
 } = require('./adapters/vertical_place_adapter');
+const {
+  syncCatalogItemToPlaces,
+  syncAllCatalogItems,
+  removeCatalogItemPlace,
+} = require('./adapters/catalog_place_adapter');
+const { removePlacesForServiceId } = require('./query_engine');
 
 function registerGeoDiscoveryRoutes(app, ctx) {
   const { store, saveStore, id, auth, requireSessionUser } = ctx;
@@ -24,10 +30,31 @@ function registerGeoDiscoveryRoutes(app, ctx) {
 
   engine.ensureStore(store);
 
+  function bumpCache() {
+    if (engine.providers && engine.providers.cache) {
+      engine.providers.cache.bumpGeneration();
+    }
+  }
+
   function syncAnyService(service) {
     const a = syncStableServiceToPlaces(store, service);
     if (a.ok) return a;
     return syncServiceToPlaces(store, service);
+  }
+
+  /** Rebuild full geo index from services + catalog (boot / repair). */
+  function rebuildGeoIndex() {
+    const boarding = syncAllStableServices(store);
+    const other = syncAllCategorizedServices(store);
+    const catalog = syncAllCatalogItems(store);
+    bumpCache();
+    return {
+      ok: true,
+      boarding: boarding.synced,
+      other: other.synced,
+      catalog: catalog.synced,
+      places: store.servicePlaces ? store.servicePlaces.size : 0,
+    };
   }
 
   // Lightweight metrics for GDE-09 observability
@@ -115,22 +142,16 @@ function registerGeoDiscoveryRoutes(app, ctx) {
   // Sync stable services → boarding ServicePlaces (GDE-03A)
   app.post('/geo/sync/stable', auth, requireSessionUser, (req, res) => {
     const out = syncAllStableServices(store);
-    if (engine.providers && engine.providers.cache) {
-      engine.providers.cache.bumpGeneration();
-    }
+    bumpCache();
     saveStore();
     res.json({ ok: true, ...out });
   });
 
-  // Sync all verticals (training/vet/feed/equipment + stable)
+  // Sync all verticals (training/vet/feed/equipment + stable + catalog)
   app.post('/geo/sync/all', auth, requireSessionUser, (req, res) => {
-    const a = syncAllStableServices(store);
-    const b = syncAllCategorizedServices(store);
-    if (engine.providers && engine.providers.cache) {
-      engine.providers.cache.bumpGeneration();
-    }
+    const out = rebuildGeoIndex();
     saveStore();
-    res.json({ ok: true, boarding: a.synced, other: b.synced });
+    res.json(out);
   });
 
   // Admin/dev upsert for Core indexing (authenticated). No vertical fields required.
@@ -158,6 +179,13 @@ function registerGeoDiscoveryRoutes(app, ctx) {
     syncStableServiceToPlaces: syncAnyService,
     syncAllStableServices,
     syncAllCategorizedServices,
+    syncCatalogItemToPlaces,
+    syncAllCatalogItems,
+    removeCatalogItemPlace,
+    removePlacesForServiceId: (serviceId) =>
+      removePlacesForServiceId(store, serviceId),
+    rebuildGeoIndex,
+    bumpCache,
   };
 }
 

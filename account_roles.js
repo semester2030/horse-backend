@@ -208,6 +208,12 @@ function assertServiceCreate(user, serviceType) {
     }
     return null;
   }
+  if (t === 'training' || t === 'trainer') {
+    if (role !== ACCOUNT_ROLES.vet_clinic && role !== ACCOUNT_ROLES.heritage_advertiser) {
+      return 'خدمة التدريب محجوزة للعيادات أو المعلن الموروث';
+    }
+    return null;
+  }
   return 'نوع الخدمة غير مسموح لحسابك';
 }
 
