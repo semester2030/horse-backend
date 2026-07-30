@@ -53,15 +53,21 @@ function buildClusters(places, { geoIndex, zoom, category } = {}) {
 }
 
 function resolveRenderMode({ requestedMode, zoom, placeCount }) {
+  const count = Number(placeCount) || 0;
+  // Few places → always individual markers (clusters hide the only result).
+  if (count > 0 && count <= 15) return 'places';
+
   if (requestedMode === 'clusters') return 'clusters';
   if (requestedMode === 'places') {
     const densityTrigger = DENSITY_CLUSTER_TRIGGER || PREFERRED_VISIBLE_MARKERS;
-    if (placeCount > densityTrigger && zoom < CLUSTER_ZOOM_THRESHOLD + 2) {
+    if (count > densityTrigger && zoom < CLUSTER_ZOOM_THRESHOLD + 2) {
       return 'clusters';
     }
     return 'places';
   }
-  return requestedMode === 'clusters' ? 'clusters' : 'places';
+  // auto (or unknown): zoom heuristic
+  if (zoom < CLUSTER_ZOOM_THRESHOLD) return 'clusters';
+  return 'places';
 }
 
 module.exports = {

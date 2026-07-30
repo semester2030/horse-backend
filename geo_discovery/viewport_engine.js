@@ -37,13 +37,11 @@ function normalizeViewportRequest(input = {}) {
 
   const limit = clampLimit(input.limit);
   const cursor = input.cursor != null && input.cursor !== '' ? String(input.cursor) : null;
-  const preferredMode =
-    input.mode === 'clusters' || input.mode === 'places' ? input.mode : 'auto';
-
-  let mode = preferredMode;
-  if (mode === 'auto') {
-    mode = zoom < CLUSTER_ZOOM_THRESHOLD ? 'clusters' : 'places';
-  }
+  // Keep auto as auto — discovery engine resolves after filtering with placeCount.
+  const mode =
+    input.mode === 'clusters' || input.mode === 'places' || input.mode === 'auto'
+      ? input.mode
+      : 'auto';
 
   return {
     ok: true,

@@ -19,6 +19,7 @@ const {
   removeCatalogItemPlace,
 } = require('./adapters/catalog_place_adapter');
 const { removePlacesForServiceId } = require('./query_engine');
+const { healMissingServicePlaces } = require('./heal_service_places');
 
 function registerGeoDiscoveryRoutes(app, ctx) {
   const { store, saveStore, id, auth, requireSessionUser } = ctx;
@@ -57,6 +58,20 @@ function registerGeoDiscoveryRoutes(app, ctx) {
     };
   }
 
+  function healThenDiscover(body) {
+    const heal = healMissingServicePlaces(store, syncAnyService);
+    if (heal.healed > 0) {
+      bumpCache();
+      try {
+        saveStore();
+      } catch (_) {
+        /* persist best-effort */
+      }
+      console.log(`[geo] healed ${heal.healed}/${heal.checked} missing places`);
+    }
+    return engine.discover(store, body || {});
+  }
+
   // Lightweight metrics for GDE-09 observability
   app.use('/geo', (req, res, next) => {
     const started = Date.now();
@@ -83,7 +98,7 @@ function registerGeoDiscoveryRoutes(app, ctx) {
 
   // Discover — viewport + filters + limit + cursor (server-authoritative)
   app.post('/geo/discover', (req, res) => {
-    const result = engine.discover(store, req.body || {});
+    const result = healThenDiscover(req.body || {});
     if (!result.ok) {
       return res.status(result.status || 400).json({ message: result.message });
     }
@@ -94,6 +109,15 @@ function registerGeoDiscoveryRoutes(app, ctx) {
 
   // Clusters — explicit cluster mode
   app.post('/geo/clusters', (req, res) => {
+    const heal = healMissingServicePlaces(store, syncAnyService);
+    if (heal.healed > 0) {
+      bumpCache();
+      try {
+        saveStore();
+      } catch (_) {
+        /* ignore */
+      }
+    }
     const result = engine.clustersOnly(store, req.body || {});
     if (!result.ok) {
       return res.status(result.status || 400).json({ message: result.message });
