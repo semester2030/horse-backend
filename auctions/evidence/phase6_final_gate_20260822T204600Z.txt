@@ -1,0 +1,186 @@
+=== NOMAS AUCTION_PHASE6_FINAL_GATE ===
+UTC: 2026-08-22T20:46:00Z
+DB: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Ownership / Approval remediation
+▶ Auction flow remediation — ownership (no PostgreSQL)
+  ✔ rejects listing owned by another user (0.392959ms)
+  ✔ rejects unlinked video (0.099334ms)
+  ✔ rejects species mismatch (0.065625ms)
+  ✔ accepts valid horse listing + linked video (0.0635ms)
+✔ Auction flow remediation — ownership (no PostgreSQL) (1.069208ms)
+▶ Auction flow remediation — developer exemption env
+  ✔ no env → no bypass identity (0.748ms)
+  ✔ only configured user id matches (0.05975ms)
+✔ Auction flow remediation — developer exemption env (1.029375ms)
+▶ Auction flow remediation — PostgreSQL integration
+  ✔ regular user cannot schedule without admin approval (17.30725ms)
+  ✔ developer owner bypass is audited and schedules without host (8.853208ms)
+  ✔ without approval events schedule is rejected (5.389417ms)
+  ✔ owner still cannot bid after remediation (8.768ms)
+  ✔ with host — no schedule until host accepts after approval (13.35325ms)
+  ✔ Path B preserves owner; host is not owner (7.945292ms)
+  ✔ unset AUCTION_DEVELOPER_USER_ID → no developer bypass on submit-review (5.118375ms)
+  ✔ non-developer owner cannot get developer bypass when env points elsewhere (4.602667ms)
+  ✔ no-host: admin approval → scheduled (6.280625ms)
+  ✔ concurrent schedule after approval — exactly one scheduled transition (11.739959ms)
+✔ Auction flow remediation — PostgreSQL integration (123.102375ms)
+ℹ tests 16
+ℹ suites 3
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 177.082916
+
+▶ Core
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.421542ms)
+  ✔ V1 species gate rejects equipment/sheep (0.244042ms)
+  ✔ settlement note documents no financial completion in V1 (0.115958ms)
+  ✔ feature flag defaults OFF in backend config (0.202875ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.12125ms)
+  ✔ health payload includes auctions isolation block (0.824042ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.091042ms)
+  ✔ audio decision prefers LiveKit and documents wiring path (0.047875ms)
+  ✔ money helper rounds currency (0.062333ms)
+  ✔ anti-sniping uses effective end (0.9455ms)
+✔ Auction V1 — unit (no PostgreSQL required) (3.683791ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (21.491333ms)
+  ✔ owner cannot bid — unauthorized (9.912167ms)
+  ✔ close race yields exactly one winner (21.814083ms)
+  ✔ host scheduling conflict detected (12.977542ms)
+  ✔ immutable event timeline appended (8.923292ms)
+  ✔ stale bid rejected when expectedVersion mismatches (7.680666ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (15.375833ms)
+  ✔ anti-sniping extends end when bid lands inside window (9.321541ms)
+  ✔ reserve price — unsold when top bid below reserve (9.712667ms)
+✔ Auction V1 — PostgreSQL integration (142.432375ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 198.637
+
+▶ Realtime
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.348125ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.495208ms)
+  ✔ 100 sequenced events remain ordered (0.292125ms)
+  ✔ sanitized bidder label hides full user id (0.083042ms)
+✔ Auction Phase 3 — WS hub (unit) (2.75675ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (16.497333ms)
+  ✔ unknown auction subscribe denied (0.373708ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (40.562667ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (17.632958ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (19.752166ms)
+  ✔ anti-sniping extension published as auction.extended (6.037208ms)
+  ✔ close race — exactly one winner after close (8.065125ms)
+  ✔ WS disconnect does not lose accepted DB bid (4.716209ms)
+✔ Auction Phase 3 — publish after commit (PostgreSQL integration) (62.703542ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 159.821291
+
+▶ Host Phase 4
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.334667ms)
+  ✔ only active+verified hosts accept bookings (0.641125ms)
+  ✔ pre-audio contract is stub only (0.5035ms)
+✔ Auction Phase 4 — host domain (unit) (1.963125ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (9.181042ms)
+  ✔ unverified host cannot accept booking requests (9.40275ms)
+  ✔ suspended host rejected for booking (8.209ms)
+  ✔ availability overlap rejected (4.432709ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (12.44175ms)
+  ✔ Path B — host proxy draft requires owner consent; admin schedules (8.649417ms)
+  ✔ host cannot become asset owner on Path B (3.204708ms)
+  ✔ concurrent booking requests — one wins for same slot (15.778625ms)
+  ✔ auction cannot schedule before admin review on host accept (10.98875ms)
+  ✔ audit timeline includes host booking events (11.713958ms)
+✔ Auction Phase 4 — host E2E (PostgreSQL) (120.354959ms)
+ℹ tests 13
+ℹ suites 2
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 169.672542
+
+▶ Audio Phase 5
+▶ Auction Phase 5 — audio domain (unit)
+  ✔ audio session state machine transitions (0.906125ms)
+  ✔ audience labels map session status (0.101ms)
+  ✔ phase5 contract enables mic for host path only (0.05975ms)
+  ✔ noop provider mints publish and subscribe tokens (0.179292ms)
+  ✔ feature flag defaults OFF (0.066792ms)
+✔ Auction Phase 5 — audio domain (unit) (1.832208ms)
+▶ Auction Phase 5 — LiveKit tokens (unit)
+  ✔ host publish token differs from audience subscribe token (69.8075ms)
+✔ Auction Phase 5 — LiveKit tokens (unit) (69.882ms)
+▶ Auction Phase 5 — audio E2E (PostgreSQL)
+  ✔ only assigned host can prepare and start audio (31.940417ms)
+  ✔ audience receives subscribe-only token; host receives publish token (17.306333ms)
+  ✔ unverified host denied for audio prepare (10.573625ms)
+  ✔ auction must be live for host audio start (13.573916ms)
+  ✔ double start is idempotent (12.369291ms)
+  ✔ admin force-end ends session and is audited (14.27675ms)
+  ✔ provider failure does not block bidding (12.368333ms)
+  ✔ pause and resume transitions (12.478833ms)
+✔ Auction Phase 5 — audio E2E (PostgreSQL) (148.785709ms)
+ℹ tests 14
+ℹ suites 3
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 271.012583
+
+▶ Phase 6 Admin/Ops
+▶ Phase 6 — unit (no PostgreSQL)
+  ✔ frozen state machine transitions (0.322375ms)
+  ✔ RBAC least privilege for auction ops (0.138166ms)
+  ✔ feature flag defaults OFF — Store Release isolation (0.210375ms)
+✔ Phase 6 — unit (no PostgreSQL) (1.571ms)
+▶ Phase 6 — PostgreSQL integration
+  ✔ review approve/reject records admin events (17.21575ms)
+  ✔ freeze prevents new bids (13.058667ms)
+  ✔ resume restores legal bidding (12.413625ms)
+  ✔ cancel is terminal audited (9.985583ms)
+  ✔ bid vs freeze race — PostgreSQL serializes (16.167375ms)
+  ✔ close vs freeze — frozen blocks close (12.988875ms)
+  ✔ dispute lifecycle open → reviewing → resolved (10.075458ms)
+  ✔ risk signal generation — abnormal velocity rule (34.29525ms)
+  ✔ immutable timeline includes ops/dispute/risk events (11.459291ms)
+  ✔ multi-instance advisory lock — concurrent transactions serialize (10.071833ms)
+  ✔ exactly one winner after close (8.16225ms)
+  ✔ REST recovery — bids persist after freeze (6.753625ms)
+  ✔ dispute lifecycle open → reviewing → rejected (6.544208ms)
+  ✔ bid vs cancel race — terminal cancel or bid accepted (6.643875ms)
+  ✔ cancel vs freeze race — one wins; auction not corrupted (6.07075ms)
+  ✔ host suspension preserves live auction and bids (7.210292ms)
+  ✔ risk signal acknowledge does not auto-ban (25.605042ms)
+✔ Phase 6 — PostgreSQL integration (242.295666ms)
+ℹ tests 20
+ℹ suites 2
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 293.17825

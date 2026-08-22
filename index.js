@@ -1968,6 +1968,7 @@ const wsHub = createWsHub({
 });
 
 let auctionRealtime = null;
+let auctionWsBridge = null;
 try {
   const { createAuctionRealtime } = require('./auctions/realtime/auction_realtime');
   const auctionDb = require('./auctions/db');
@@ -1977,6 +1978,27 @@ try {
   });
 } catch (_) {
   auctionRealtime = null;
+}
+
+async function startAuctionWsCrossInstance() {
+  try {
+    const auctionDb = require('./auctions/db');
+    if (!auctionDb.isDbConfigured()) return null;
+    const { createPgAuctionWsBridge } = require('./ws_pg_broker');
+    const { getTransportConfig } = require('./transport_config');
+    auctionWsBridge = createPgAuctionWsBridge({
+      getPool: () => auctionDb.getPool(),
+      wsHub,
+      replayWindow: getTransportConfig().wsReplayWindow,
+    });
+    wsHub.setAuctionCrossInstance(auctionWsBridge);
+    await auctionWsBridge.startListening();
+    console.log('[ws] auction PostgreSQL cross-instance fan-out active');
+    return auctionWsBridge;
+  } catch (e) {
+    console.warn('[ws] auction cross-instance disabled:', e.message);
+    return null;
+  }
 }
 
 registerAuctions(app, {
@@ -3824,6 +3846,9 @@ server.listen(PORT, HOST, async () => {
     const auctionsBoot = await initAuctionsModule();
     if (auctionsBoot.enabled) {
       console.log(`[auctions] enabled=${auctionsBoot.enabled} ready=${auctionsBoot.ready}`);
+      if (auctionsBoot.ready) {
+        await startAuctionWsCrossInstance();
+      }
     }
   } catch (e) {
     console.error('[auctions] init failed:', e.message);

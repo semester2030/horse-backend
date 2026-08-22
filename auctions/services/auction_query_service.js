@@ -4,6 +4,7 @@ const { mapAuctionRow } = require('./auction_service');
 const { mapBidRow } = require('./bid_service');
 const { effectiveEndAt } = require('../domain/states');
 const { audienceAudioLabel } = require('./audio_service');
+const { isAuctionApproved } = require('./approval_flow');
 
 function enrichVideoFromStore(auction, store) {
   if (!auction || !store?.videos) return auction;
@@ -91,6 +92,7 @@ async function getAuctionById(pool, id) {
   a.serverTime = now.toISOString();
   a.effectiveEndAt = effectiveEndAt(rows[0], now).toISOString();
   a.nextValidBid = Number(a.currentPrice) + Number(a.minimumIncrement);
+  a.isApproved = await isAuctionApproved(pool, id);
   return a;
 }
 

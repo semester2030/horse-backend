@@ -140,6 +140,28 @@ function createRoomSequencer(replayWindow) {
   }
 
   /**
+   * Merge a sequenced event from PostgreSQL fan-out (cross-instance).
+   */
+  function storeAt(room, seq, event) {
+    const s = stream(room);
+    const n = Number(seq);
+    if (!Number.isFinite(n) || n <= 0) return { ...event, seq: n };
+    const sequenced = { ...event, seq: n };
+    if (s.nextSeq <= n) s.nextSeq = n + 1;
+    const idx = s.events.findIndex((e) => e.seq === n);
+    if (idx >= 0) {
+      s.events[idx] = { seq: n, event: sequenced };
+    } else {
+      s.events.push({ seq: n, event: sequenced });
+      s.events.sort((a, b) => a.seq - b.seq);
+    }
+    while (s.events.length > replayWindow) {
+      s.events.shift();
+    }
+    return sequenced;
+  }
+
+  /**
    * Events with seq > afterSeq, in ascending order. No duplicates.
    */
   function replayAfter(room, afterSeq) {
@@ -158,7 +180,7 @@ function createRoomSequencer(replayWindow) {
     return s ? s.nextSeq - 1 : 0;
   }
 
-  return { assignAndStore, replayAfter, currentSeq, _streams: streams };
+  return { assignAndStore, storeAt, replayAfter, currentSeq, _streams: streams };
 }
 
 function isSequencedRoom(room) {
@@ -173,6 +195,8 @@ function createWsHub(options = {}) {
   const heartbeatMs = cfg.wsHeartbeatMs;
   const heartbeatTimeoutMs = cfg.wsHeartbeatTimeoutMs;
   const sequencer = createRoomSequencer(replayWindow);
+  /** @type {null | { replayToClient: Function }} */
+  let auctionCrossInstance = null;
 
   /** @type {Map<string, Set<object>>} */
   const rooms = new Map();
@@ -224,6 +248,15 @@ function createWsHub(options = {}) {
     return n;
   }
 
+  /** Fan-out pre-sequenced auction event without re-assigning seq. */
+  function publishSequenced(room, sequencedEvent) {
+    return publish(room, sequencedEvent);
+  }
+
+  function setAuctionCrossInstance(bridge) {
+    auctionCrossInstance = bridge;
+  }
+
   /**
    * Assign one seq on request:{id} stream, fan-out identical sequenced event.
    * Guarantees Offer → Counter → Accept → Reject → Withdraw → Expire order.
@@ -234,6 +267,12 @@ function createWsHub(options = {}) {
   function publishAuction(event) {
     const auctionId = event.auctionId;
     if (!auctionId) return event;
+    if (auctionCrossInstance && typeof auctionCrossInstance.append === 'function') {
+      void auctionCrossInstance.append(event).catch((err) => {
+        console.error('[ws_hub] auction cross-instance append failed:', err.message);
+      });
+      return event;
+    }
     const room = `auction:${auctionId}`;
     const sequenced = sequencer.assignAndStore(room, {
       ...event,
@@ -241,6 +280,15 @@ function createWsHub(options = {}) {
     });
     publish(room, sequenced);
     return sequenced;
+  }
+
+  async function publishAuctionAsync(event) {
+    const auctionId = event.auctionId;
+    if (!auctionId) return event;
+    if (auctionCrossInstance && typeof auctionCrossInstance.append === 'function') {
+      return await auctionCrossInstance.append(event);
+    }
+    return publishAuction(event);
   }
 
   function handleSequencedSubscribe(client, room, data, { resume = false } = {}) {
@@ -271,20 +319,29 @@ function createWsHub(options = {}) {
             : 0;
       const floor = Number.isFinite(last) ? last : 0;
       client.lastReceivedSequenceByRoom.set(room, floor);
+      let curSeq = sequencer.currentSeq(room);
+      if (
+        auctionCrossInstance &&
+        typeof auctionCrossInstance.currentSeq === 'function' &&
+        String(room).startsWith('auction:')
+      ) {
+        const auctionId = String(room).slice('auction:'.length);
+        curSeq = await auctionCrossInstance.currentSeq(auctionId);
+      }
       if (resume) {
         safeSend(client, {
           type: 'resume.ack',
           room,
           connectionId: client.connectionId,
           lastReceivedSequence: floor,
-          currentSeq: sequencer.currentSeq(room),
+          currentSeq: curSeq,
         });
       } else {
         safeSend(client, {
           type: 'subscribed',
           room,
           connectionId: client.connectionId,
-          currentSeq: sequencer.currentSeq(room),
+          currentSeq: curSeq,
         });
       }
       if (Number.isFinite(floor) && floor >= 0) {
@@ -317,6 +374,14 @@ function createWsHub(options = {}) {
   }
 
   function replayToClient(client, room, lastReceivedSequence) {
+    if (
+      auctionCrossInstance &&
+      typeof auctionCrossInstance.replayToClient === 'function' &&
+      String(room).startsWith('auction:')
+    ) {
+      void auctionCrossInstance.replayToClient(client, room, lastReceivedSequence);
+      return 0;
+    }
     const missed = sequencer.replayAfter(room, lastReceivedSequence);
     if (missed.length === 0) {
       safeSend(client, {
@@ -493,10 +558,14 @@ function createWsHub(options = {}) {
   return {
     handleUpgrade,
     publish,
+    publishSequenced,
     publishNegotiation,
     publishAuction,
+    publishAuctionAsync,
+    setAuctionCrossInstance,
     replayAfter: sequencer.replayAfter,
     currentSeq: sequencer.currentSeq,
+    safeSend,
     clientCount: () => clients.size,
     _sequencer: sequencer,
     _rooms: rooms,

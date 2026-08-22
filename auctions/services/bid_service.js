@@ -32,6 +32,7 @@ async function placeBid(client, {
   amount,
   idempotencyKey,
   expectedVersion,
+  allowOwnerBid = false,
 }) {
   const key = String(idempotencyKey || '').trim();
   if (!key) {
@@ -105,7 +106,10 @@ async function placeBid(client, {
     throw err;
   }
 
-  if (String(auction.owner_user_id) === String(bidderUserId)) {
+  if (
+    !allowOwnerBid &&
+    String(auction.owner_user_id) === String(bidderUserId)
+  ) {
     const err = new Error('Owner cannot bid on own auction');
     err.code = 'BID_OWNER_FORBIDDEN';
     err.status = 403;

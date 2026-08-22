@@ -40,7 +40,14 @@ describe('Auction V1 — unit (no PostgreSQL required)', () => {
   });
 
   it('feature flag defaults OFF in backend config', () => {
-    assert.equal(ENABLE_AUCTIONS, false);
+    const prev = process.env.ENABLE_AUCTIONS;
+    delete process.env.ENABLE_AUCTIONS;
+    delete require.cache[require.resolve('./config')];
+    const { isAuctionsEnabled } = require('./config');
+    assert.equal(isAuctionsEnabled(), false);
+    if (prev == null) delete process.env.ENABLE_AUCTIONS;
+    else process.env.ENABLE_AUCTIONS = prev;
+    delete require.cache[require.resolve('./config')];
   });
 
   it('Store Release isolation — app_config enableAuctions default false', () => {
@@ -140,7 +147,8 @@ describe('Auction V1 — PostgreSQL integration', () => {
       antiSnipingSeconds: opts.antiSnipingSeconds ?? 30,
     });
     await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
-    await auctionService.transitionAuction(client, auction.id, 'scheduled', { actorUserId: 'admin' });
+    const { approveAuctionReview } = require('./services/approval_flow');
+    await approveAuctionReview(client, auction.id, 'admin', { bypass: 'admin' });
     await auctionService.transitionAuction(client, auction.id, 'live', { actorUserId: 'admin' });
     const { rows } = await client.query(
       `SELECT a.*, l.listing_id, l.video_id FROM auctions a JOIN auction_lots l ON l.id = a.lot_id WHERE a.id = $1`,
@@ -275,7 +283,11 @@ describe('Auction V1 — PostgreSQL integration', () => {
         minimumIncrement: 25,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
+      await auctionService.transitionAuction(client, a1.id, 'review', { actorUserId: 'admin' });
+      const { recordAuctionApproval } = require('./services/approval_flow');
+      await recordAuctionApproval(client, a1.id, 'admin', { bypass: 'admin' });
       await hostService.requestHostBooking(client, {
         auctionId: a1.id,
         hostId: host.id,
@@ -293,7 +305,10 @@ describe('Auction V1 — PostgreSQL integration', () => {
         minimumIncrement: 25,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
+      await auctionService.transitionAuction(client, a2.id, 'review', { actorUserId: 'admin' });
+      await recordAuctionApproval(client, a2.id, 'admin', { bypass: 'admin' });
       await assert.rejects(
         () =>
           hostService.requestHostBooking(client, {
@@ -404,7 +419,8 @@ describe('Auction V1 — PostgreSQL integration', () => {
         antiSnipingSeconds: 30,
       });
       await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
-      await auctionService.transitionAuction(client, auction.id, 'scheduled', { actorUserId: 'admin' });
+      const { approveAuctionReview } = require('./services/approval_flow');
+      await approveAuctionReview(client, auction.id, 'admin', { bypass: 'admin' });
       await auctionService.transitionAuction(client, auction.id, 'live', { actorUserId: 'admin' });
 
       await bidService.placeBid(client, {

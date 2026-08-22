@@ -1,0 +1,96 @@
+=== NOMAS Auction Phase 1.1 Integration Gate ===
+UTC: 2026-08-22T18:27:16Z
+AUCTIONS_TEST_DATABASE_URL: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.4705ms)
+  ✔ V1 species gate rejects equipment/sheep (0.248166ms)
+  ✔ settlement note documents no financial completion in V1 (0.129041ms)
+  ✔ feature flag defaults OFF in backend config (0.049458ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.130291ms)
+  ✔ health payload includes auctions isolation block (0.575666ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.642542ms)
+  ✔ audio decision prefers LiveKit and documents wiring path (0.06775ms)
+  ✔ money helper rounds currency (0.068834ms)
+  ✔ anti-sniping uses effective end (0.995917ms)
+✔ Auction V1 — unit (no PostgreSQL required) (4.016458ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (22.46975ms)
+  ✔ owner cannot bid — unauthorized (9.403125ms)
+  ✔ close race yields exactly one winner (22.269791ms)
+  ✔ host scheduling conflict detected (12.316042ms)
+  ✔ immutable event timeline appended (8.457917ms)
+  ✔ stale bid rejected when expectedVersion mismatches (8.28575ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (20.946291ms)
+  ✔ anti-sniping extends end when bid lands inside window (10.446834ms)
+  ✔ reserve price — unsold when top bid below reserve (10.957209ms)
+✔ Auction V1 — PostgreSQL integration (151.940375ms)
+▶ Auction flow remediation — ownership (no PostgreSQL)
+  ✔ rejects listing owned by another user (0.405792ms)
+  ✔ rejects unlinked video (0.104917ms)
+  ✔ rejects species mismatch (0.068666ms)
+  ✔ accepts valid horse listing + linked video (0.062167ms)
+✔ Auction flow remediation — ownership (no PostgreSQL) (1.101708ms)
+▶ Auction flow remediation — developer exemption env
+  ✔ no env → no bypass identity (0.675041ms)
+  ✔ only configured user id matches (0.119542ms)
+✔ Auction flow remediation — developer exemption env (1.111542ms)
+▶ Auction flow remediation — PostgreSQL integration
+  ✔ regular user cannot schedule without admin approval (13.249625ms)
+  ✔ developer owner bypass is audited and schedules without host (8.990917ms)
+  ✔ without approval events schedule is rejected (4.773458ms)
+  ✔ owner still cannot bid after remediation (9.383542ms)
+  ✔ with host — no schedule until host accepts after approval (13.199958ms)
+  ✔ Path B preserves owner; host is not owner (7.869375ms)
+  ✔ unset AUCTION_DEVELOPER_USER_ID → no developer bypass on submit-review (5.090333ms)
+  ✔ non-developer owner cannot get developer bypass when env points elsewhere (4.483666ms)
+  ✔ no-host: admin approval → scheduled (6.465417ms)
+  ✖ concurrent schedule after approval — exactly one scheduled transition (11.124541ms)
+✖ Auction flow remediation — PostgreSQL integration (110.2125ms)
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.532125ms)
+  ✔ only active+verified hosts accept bookings (0.740459ms)
+  ✔ pre-audio contract is stub only (0.520292ms)
+✔ Auction Phase 4 — host domain (unit) (2.332666ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (9.671375ms)
+  ✔ unverified host cannot accept booking requests (9.686416ms)
+  ✔ suspended host rejected for booking (8.437875ms)
+  ✔ availability overlap rejected (4.306666ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (12.719334ms)
+  ✔ Path B — host proxy draft requires owner consent; admin schedules (8.826084ms)
+  ✔ host cannot become asset owner on Path B (3.210958ms)
+  ✔ concurrent booking requests — one wins for same slot (15.800625ms)
+  ✔ auction cannot schedule before admin review on host accept (10.927209ms)
+  ✔ audit timeline includes host booking events (12.612667ms)
+✔ Auction Phase 4 — host E2E (PostgreSQL) (122.013792ms)
+ℹ tests 48
+ℹ suites 7
+ℹ pass 47
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 537.302375
+
+✖ failing tests:
+
+test at auctions/auction_flow_remediation.test.js:474:3
+✖ concurrent schedule after approval — exactly one scheduled transition (11.124541ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at /Users/fayez/Desktop/horse/backend/auctions/auction_flow_remediation.test.js:500:14
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/auction_flow_remediation.test.js:476:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

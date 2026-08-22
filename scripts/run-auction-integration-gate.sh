@@ -24,10 +24,10 @@ OUT="$EVIDENCE_DIR/integration_gate_$(date -u +%Y%m%dT%H%M%SZ).txt"
   echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "AUCTIONS_TEST_DATABASE_URL: $DB_URL"
   echo ""
-  node --test auctions/auction_core.test.js
+  node --test --test-concurrency=1 auctions/auction_core.test.js auctions/auction_flow_remediation.test.js auctions/host_phase4.test.js
 } 2>&1 | tee "$OUT"
 
-if grep -q "ℹ fail 0" "$OUT" && grep -q "ℹ pass 1[89]" "$OUT"; then
+if grep -q "ℹ fail 0" "$OUT" && grep -qE "ℹ pass (4[0-9]|50)" "$OUT"; then
   echo ""
   echo "VERDICT: A — all integration tests PASS"
   echo "Evidence: $OUT"

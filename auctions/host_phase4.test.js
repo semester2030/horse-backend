@@ -109,7 +109,11 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
         minimumIncrement: 100,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
+      await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
+      const { recordAuctionApproval } = require('./services/approval_flow');
+      await recordAuctionApproval(client, auction.id, 'admin', { bypass: 'admin' });
       await assert.rejects(
         () =>
           hostService.requestHostBooking(client, {
@@ -151,7 +155,11 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
         minimumIncrement: 100,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
+      await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
+      const { recordAuctionApproval } = require('./services/approval_flow');
+      await recordAuctionApproval(client, auction.id, 'admin', { bypass: 'admin' });
       await assert.rejects(
         () =>
           hostService.requestHostBooking(client, {
@@ -216,10 +224,13 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
         minimumIncrement: 100,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
       await auctionService.transitionAuction(client, auction.id, 'review', {
         actorUserId: 'admin-1',
       });
+      const { approveAuctionReview } = require('./services/approval_flow');
+      await approveAuctionReview(client, auction.id, 'admin-1', { bypass: 'admin' });
       const booking = await hostService.requestHostBooking(client, {
         auctionId: auction.id,
         hostId: host.id,
@@ -268,8 +279,9 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
       await auctionService.transitionAuction(client, auction.id, 'review', {
         actorUserId: 'admin-1',
       });
-      const scheduled = await auctionService.transitionAuction(client, auction.id, 'scheduled', {
-        actorUserId: 'admin-1',
+      const { approveAuctionReview } = require('./services/approval_flow');
+      const scheduled = await approveAuctionReview(client, auction.id, 'admin-1', {
+        bypass: 'admin',
       });
       assert.equal(scheduled.status, 'scheduled');
     });
@@ -328,6 +340,8 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
           endAt: end.toISOString(),
         });
         await auctionService.transitionAuction(client, a.id, 'review', { actorUserId: 'admin' });
+        const { recordAuctionApproval } = require('./services/approval_flow');
+        await recordAuctionApproval(client, a.id, 'admin', { bypass: 'admin' });
         auctionIds.push(a.id);
       }
     });
@@ -375,18 +389,19 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
         minimumIncrement: 100,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
-      const booking = await hostService.requestHostBooking(client, {
-        auctionId: auction.id,
-        hostId: host.id,
-        requestedByUserId: 'owner-draft',
-        scheduledStartAt: start.toISOString(),
-        scheduledEndAt: end.toISOString(),
+      await auctionService.transitionAuction(client, auction.id, 'review', {
+        actorUserId: 'owner-draft',
       });
       await assert.rejects(
         () =>
-          hostService.respondHostBooking(client, booking.id, true, {
-            actorUserId: 'host-draft',
+          hostService.requestHostBooking(client, {
+            auctionId: auction.id,
+            hostId: host.id,
+            requestedByUserId: 'owner-draft',
+            scheduledStartAt: start.toISOString(),
+            scheduledEndAt: end.toISOString(),
           }),
         (e) => e.code === 'HOST_AUCTION_NOT_APPROVED',
       );
@@ -416,8 +431,11 @@ describe('Auction Phase 4 — host E2E (PostgreSQL)', () => {
         minimumIncrement: 100,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
+        requiresHost: true,
       });
       await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
+      const { approveAuctionReview } = require('./services/approval_flow');
+      await approveAuctionReview(client, auction.id, 'admin', { bypass: 'admin' });
       const booking = await hostService.requestHostBooking(client, {
         auctionId: auction.id,
         hostId: host.id,

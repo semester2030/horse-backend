@@ -21,25 +21,25 @@ OUT="$EVIDENCE_DIR/phase6_gate_$(date -u +%Y%m%dT%H%M%SZ).txt"
   echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo ""
   echo "▶ Core regression"
-  node --test auctions/auction_core.test.js
+  node --test --test-concurrency=1 auctions/auction_core.test.js
   echo ""
   echo "▶ Realtime regression"
-  node --test auctions/auction_realtime.test.js
+  node --test --test-concurrency=1 auctions/auction_realtime.test.js
   echo ""
   echo "▶ Host Phase 4 regression"
-  node --test auctions/host_phase4.test.js
+  node --test --test-concurrency=1 auctions/host_phase4.test.js
   echo ""
   echo "▶ Audio Phase 5 regression"
-  node --test auctions/audio_phase5.test.js
+  node --test --test-concurrency=1 auctions/audio_phase5.test.js
   echo ""
   echo "▶ Phase 6 Admin/Ops"
-  node --test auctions/phase6_ops.test.js
+  node --test --test-concurrency=1 auctions/phase6_ops.test.js
 } 2>&1 | tee "$OUT"
 
 if grep -q "ℹ pass 19" "$OUT" && grep -q "ℹ pass 11" "$OUT" && grep -q "ℹ pass 13" "$OUT"; then
   if grep -q "Phase 6" "$OUT" && ! grep -q "✖" "$OUT"; then
     P6_PASS=$(grep -E "ℹ pass [0-9]+" "$OUT" | tail -1 | sed -E 's/.*pass ([0-9]+).*/\1/')
-    if [[ "${P6_PASS:-0}" -ge 14 ]]; then
+    if [[ "${P6_PASS:-0}" -ge 19 ]]; then
       echo ""
       echo "VERDICT: A — core + realtime + host + audio + phase6 gates PASS"
       echo "Evidence: $OUT"

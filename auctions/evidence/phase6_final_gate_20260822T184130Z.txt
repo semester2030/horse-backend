@@ -1,0 +1,91 @@
+=== NOMAS AUCTION_PHASE6_FINAL_GATE ===
+UTC: 2026-08-22T18:41:30Z
+DB: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Ownership / Approval remediation
+▶ Auction flow remediation — ownership (no PostgreSQL)
+  ✔ rejects listing owned by another user (0.40575ms)
+  ✔ rejects unlinked video (0.105541ms)
+  ✔ rejects species mismatch (0.068584ms)
+  ✔ accepts valid horse listing + linked video (0.062375ms)
+✔ Auction flow remediation — ownership (no PostgreSQL) (1.108042ms)
+▶ Auction flow remediation — developer exemption env
+  ✔ no env → no bypass identity (0.700417ms)
+  ✔ only configured user id matches (0.068ms)
+✔ Auction flow remediation — developer exemption env (0.95825ms)
+▶ Auction flow remediation — PostgreSQL integration
+  ✔ regular user cannot schedule without admin approval (16.320875ms)
+  ✔ developer owner bypass is audited and schedules without host (8.704792ms)
+  ✔ without approval events schedule is rejected (5.676042ms)
+  ✔ owner still cannot bid after remediation (8.7765ms)
+  ✔ with host — no schedule until host accepts after approval (12.403958ms)
+  ✔ Path B preserves owner; host is not owner (7.501459ms)
+  ✔ unset AUCTION_DEVELOPER_USER_ID → no developer bypass on submit-review (4.472708ms)
+  ✔ non-developer owner cannot get developer bypass when env points elsewhere (4.580792ms)
+  ✔ no-host: admin approval → scheduled (6.31275ms)
+  ✔ concurrent schedule after approval — exactly one scheduled transition (12.736292ms)
+✔ Auction flow remediation — PostgreSQL integration (120.08075ms)
+ℹ tests 16
+ℹ suites 3
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 175.088541
+
+▶ Core
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.465916ms)
+  ✔ V1 species gate rejects equipment/sheep (0.239042ms)
+  ✔ settlement note documents no financial completion in V1 (0.115875ms)
+  ✖ feature flag defaults OFF in backend config (1.300084ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.618916ms)
+  ✔ health payload includes auctions isolation block (0.588875ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.093167ms)
+  ✔ audio decision prefers LiveKit and documents wiring path (0.051375ms)
+  ✔ money helper rounds currency (0.102208ms)
+  ✔ anti-sniping uses effective end (0.802291ms)
+✖ Auction V1 — unit (no PostgreSQL required) (5.169959ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (20.641209ms)
+  ✔ owner cannot bid — unauthorized (9.207541ms)
+  ✔ close race yields exactly one winner (23.142875ms)
+  ✔ host scheduling conflict detected (12.613125ms)
+  ✔ immutable event timeline appended (8.405667ms)
+  ✔ stale bid rejected when expectedVersion mismatches (8.524792ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (15.94925ms)
+  ✔ anti-sniping extends end when bid lands inside window (9.8265ms)
+  ✔ reserve price — unsold when top bid below reserve (9.721667ms)
+✔ Auction V1 — PostgreSQL integration (143.662958ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 18
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 202.048042
+
+✖ failing tests:
+
+test at auctions/auction_core.test.js:42:3
+✖ feature flag defaults OFF in backend config (1.300084ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/auction_core.test.js:43:12)
+      at Test.runInAsyncScope (node:async_hooks:213:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

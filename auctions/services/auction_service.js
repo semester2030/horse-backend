@@ -148,10 +148,11 @@ async function createAuctionDraft(client, input) {
     listing_id: lot.listing_id,
     video_id: lot.video_id,
   };
+  const requiresHost = input.requiresHost === true;
   await appendEvent(client, {
     auctionId: auctionRow.id,
     eventType: 'auction.created',
-    payload: { status: 'draft', species: sp },
+    payload: { status: 'draft', species: sp, requiresHost },
     actorUserId: input.createdByUserId,
   });
   return mapAuctionRow(auctionRow);

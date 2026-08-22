@@ -43,6 +43,12 @@ const {
 const { PRE_AUDIO_CONTRACT } = require('./audio/pre_audio_contract');
 const { createAuctionAudioProvider } = require('./audio');
 const { assertSpecies } = require('./domain/species');
+const { isAuctionDeveloperUserId } = require('./dev_testing');
+const { validateAuctionAssetOwnership } = require('./services/ownership_validation');
+const {
+  scheduleAuctionIfEligible,
+  approveAuctionReview,
+} = require('./services/approval_flow');
 const { getPool } = require('./db');
 const { freezeAuction, resumeAuction, adminCancelAuction } = require('./services/ops_service');
 const {
@@ -174,8 +180,55 @@ function registerAuctionRoutes(app, ctx) {
         return res.status(400).json({ message: 'ownerUserId required' });
       }
 
-      const auction = await withTransaction((client) =>
-        createAuctionDraft(client, {
+      if (createdByRole === 'seller' && String(ownerUserId) !== String(req.authUserId)) {
+        return res.status(403).json({
+          message: 'Seller auctions must be created for your own listings',
+          code: 'AUCTION_OWNER_FORBIDDEN',
+        });
+      }
+
+      if (createdByRole === 'host_proxy') {
+        if (!body.ownerConsentRef) {
+          return res.status(400).json({
+            message: 'ownerConsentRef required for host_proxy',
+            code: 'AUCTION_OWNER_CONSENT_REQUIRED',
+          });
+        }
+        if (String(ownerUserId) === String(req.authUserId)) {
+          return res.status(403).json({
+            message: 'Host proxy cannot target own account as owner',
+            code: 'HOST_PROXY_OWNER_MISMATCH',
+          });
+        }
+      }
+
+      const ownership = validateAuctionAssetOwnership(ctx.store, {
+        listingId: body.listingId,
+        videoId: body.videoId,
+        species,
+        ownerUserId,
+      });
+      if (!ownership.ok) {
+        return res.status(ownership.status).json({
+          message: ownership.message,
+          code: ownership.code,
+        });
+      }
+
+      const requiresHost = body.requiresHost === true;
+
+      const auction = await withTransaction(async (client) => {
+        if (createdByRole === 'host_proxy') {
+          const host = await getHostByUserId(client, req.authUserId);
+          if (!host || host.status !== 'active' || !host.verifiedAt) {
+            const err = new Error('Host must be verified and active for Path B');
+            err.code = 'HOST_NOT_ACTIVE';
+            err.status = 403;
+            throw err;
+          }
+        }
+
+        return createAuctionDraft(client, {
           listingId: body.listingId,
           videoId: body.videoId,
           species,
@@ -190,8 +243,9 @@ function registerAuctionRoutes(app, ctx) {
           startAt: body.startAt,
           endAt: body.endAt,
           antiSnipingSeconds: body.antiSnipingSeconds,
-        }),
-      );
+          requiresHost,
+        });
+      });
       res.status(201).json({ auction });
     } catch (err) {
       res.status(err.status || 500).json({
@@ -205,13 +259,45 @@ function registerAuctionRoutes(app, ctx) {
     try {
       let beforeStatus;
       const auction = await withTransaction(async (client) => {
-        const { rows } = await client.query('SELECT status FROM auctions WHERE id = $1', [
-          req.params.id,
-        ]);
-        beforeStatus = rows[0]?.status;
-        return transitionAuction(client, req.params.id, 'review', {
-          actorUserId: req.authUserId,
-        });
+        const { rows } = await client.query(
+          'SELECT status, owner_user_id FROM auctions WHERE id = $1',
+          [req.params.id],
+        );
+        const row = rows[0];
+        if (!row) {
+          const err = new Error('Auction not found');
+          err.code = 'AUCTION_NOT_FOUND';
+          err.status = 404;
+          throw err;
+        }
+        beforeStatus = row.status;
+        let result;
+        if (row.status === 'draft') {
+          result = await transitionAuction(client, req.params.id, 'review', {
+            actorUserId: req.authUserId,
+          });
+        } else if (row.status === 'review') {
+          const { rows: fresh } = await client.query(
+            `SELECT a.*, l.listing_id, l.video_id
+             FROM auctions a JOIN auction_lots l ON l.id = a.lot_id WHERE a.id = $1`,
+            [req.params.id],
+          );
+          result = mapAuctionRow(fresh[0]);
+        } else {
+          const err = new Error('Auction not in draft or review status');
+          err.code = 'AUCTION_REVIEW_INVALID';
+          err.status = 409;
+          throw err;
+        }
+
+        if (isAuctionDeveloperUserId(row.owner_user_id)) {
+          result = await approveAuctionReview(client, req.params.id, req.authUserId, {
+            bypass: 'developer',
+            reason: 'owner_developer_exemption',
+          });
+        }
+
+        return result;
       });
       if (auctionRealtime) {
         auctionRealtime.publishTransition(beforeStatus, auction);
@@ -230,9 +316,7 @@ function registerAuctionRoutes(app, ctx) {
           req.params.id,
         ]);
         beforeStatus = rows[0]?.status;
-        return transitionAuction(client, req.params.id, 'scheduled', {
-          actorUserId: req.authUserId,
-        });
+        return scheduleAuctionIfEligible(client, req.params.id, req.authUserId);
       });
       if (auctionRealtime) {
         auctionRealtime.publishTransition(beforeStatus, auction);
@@ -1079,7 +1163,6 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     requirePerm('auctions:moderate'),
     async (req, res) => {
       try {
-        const to = req.body?.approve ? 'scheduled' : 'cancelled';
         let beforeStatus;
         const auction = await withTransaction(async (client) => {
           const { rows } = await client.query('SELECT status FROM auctions WHERE id = $1', [
@@ -1092,17 +1175,25 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
             err.status = 409;
             throw err;
           }
-          const result = await transitionAuction(client, req.params.id, to, {
-            actorUserId: adminActor(req),
+
+          if (!req.body?.approve) {
+            const result = await transitionAuction(client, req.params.id, 'cancelled', {
+              actorUserId: adminActor(req),
+              reason: req.body?.reason,
+            });
+            await require('./services/auction_service').appendEvent(client, {
+              auctionId: req.params.id,
+              eventType: 'admin.review.rejected',
+              payload: { reason: req.body?.reason || null },
+              actorUserId: adminActor(req),
+            });
+            return result;
+          }
+
+          return approveAuctionReview(client, req.params.id, adminActor(req), {
+            bypass: 'admin',
             reason: req.body?.reason,
           });
-          await require('./services/auction_service').appendEvent(client, {
-            auctionId: req.params.id,
-            eventType: req.body?.approve ? 'admin.review.approved' : 'admin.review.rejected',
-            payload: { reason: req.body?.reason || null },
-            actorUserId: adminActor(req),
-          });
-          return result;
         });
         if (auctionRealtime) {
           auctionRealtime.publishTransition(beforeStatus, auction, {

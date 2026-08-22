@@ -415,9 +415,17 @@ async function requestHostBooking(client, input) {
     err.status = 403;
     throw err;
   }
-  if (!['draft', 'review'].includes(auction.status)) {
+  if (!['review'].includes(auction.status)) {
     const err = new Error('Auction not eligible for host booking');
     err.code = 'HOST_AUCTION_STATE_INVALID';
+    err.status = 409;
+    throw err;
+  }
+
+  const { isAuctionApproved } = require('./approval_flow');
+  if (!(await isAuctionApproved(client, auction.id))) {
+    const err = new Error('Auction must be admin-approved before host booking');
+    err.code = 'HOST_AUCTION_NOT_APPROVED';
     err.status = 409;
     throw err;
   }
@@ -524,6 +532,14 @@ async function respondHostBooking(client, bookingId, accept, { actorUserId, reje
   const auction = auctionRows[0];
   if (!['review', 'scheduled'].includes(auction.status)) {
     const err = new Error('Auction must be admin-approved (review) before host accept schedules it');
+    err.code = 'HOST_AUCTION_NOT_APPROVED';
+    err.status = 409;
+    throw err;
+  }
+
+  const { isAuctionApproved } = require('./approval_flow');
+  if (!(await isAuctionApproved(client, booking.auction_id))) {
+    const err = new Error('Auction must be admin-approved before host accept');
     err.code = 'HOST_AUCTION_NOT_APPROVED';
     err.status = 409;
     throw err;

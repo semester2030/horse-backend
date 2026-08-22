@@ -26,6 +26,21 @@ describe('Phase 6 — unit (no PostgreSQL)', () => {
     assert.equal(support.includes('auctions:ops'), false);
     assert.equal(can({ active: true, role: ADMIN_ROLES.support }, 'auctions:ops'), false);
     assert.equal(can({ active: true, role: ADMIN_ROLES.moderator }, 'auctions:ops'), true);
+    assert.equal(can({ active: true, role: ADMIN_ROLES.support }, 'auctions:read'), false);
+    assert.equal(can({ active: true, role: ADMIN_ROLES.support }, 'auctions:moderate'), false);
+    assert.equal(can({ active: true, role: ADMIN_ROLES.support }, 'auctions:disputes'), false);
+    assert.equal(can({ active: true, role: ADMIN_ROLES.moderator }, 'auctions:read'), true);
+  });
+
+  it('feature flag defaults OFF — Store Release isolation', () => {
+    const prev = process.env.ENABLE_AUCTIONS;
+    delete process.env.ENABLE_AUCTIONS;
+    delete require.cache[require.resolve('./config')];
+    const { isAuctionsEnabled } = require('./config');
+    assert.equal(isAuctionsEnabled(), false);
+    if (prev == null) delete process.env.ENABLE_AUCTIONS;
+    else process.env.ENABLE_AUCTIONS = prev;
+    delete require.cache[require.resolve('./config')];
   });
 });
 
@@ -90,7 +105,8 @@ describe('Phase 6 — PostgreSQL integration', { concurrency: 1 }, () => {
       antiSnipingSeconds: 0,
     });
     await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
-    await auctionService.transitionAuction(client, auction.id, 'scheduled', { actorUserId: 'admin' });
+    const { approveAuctionReview } = require('./services/approval_flow');
+    await approveAuctionReview(client, auction.id, 'admin', { bypass: 'admin' });
     await auctionService.transitionAuction(client, auction.id, 'live', { actorUserId: 'admin' });
     return auction;
   }
@@ -111,15 +127,14 @@ describe('Phase 6 — PostgreSQL integration', { concurrency: 1 }, () => {
         endAt: new Date(Date.now() + 7200000).toISOString(),
       });
       await auctionService.transitionAuction(client, auction.id, 'review', { actorUserId: 'admin' });
-      const approved = await auctionService.transitionAuction(client, auction.id, 'scheduled', {
-        actorUserId: 'admin-1',
-      });
+      const { approveAuctionReview } = require('./services/approval_flow');
+      const approved = await approveAuctionReview(client, auction.id, 'admin', { bypass: 'admin' });
       assert.equal(approved.status, 'scheduled');
       const { rows: events } = await client.query(
         `SELECT event_type FROM auction_events WHERE auction_id = $1 ORDER BY created_at ASC`,
         [auction.id],
       );
-      assert.ok(events.some((e) => e.event_type === 'auction.status_changed'));
+      assert.ok(events.some((e) => e.event_type === 'admin.review.approved'));
     });
   });
 
@@ -374,6 +389,142 @@ describe('Phase 6 — PostgreSQL integration', { concurrency: 1 }, () => {
         auction.id,
       ]);
       assert.equal(rows[0].c, 1);
+    });
+  });
+
+  it('dispute lifecycle open → reviewing → rejected', async (t) => {
+    if (!url) return t.skip('no DB');
+    await db.withTransaction(async (client) => {
+      await wipe(client);
+      const auction = await seedLiveAuction(client);
+      const dispute = await disputeService.createDispute(client, {
+        auctionId: auction.id,
+        reporterUserId: 'user-rej',
+        category: 'conduct',
+        description: 'Rejected path test',
+      });
+      await disputeService.assignDispute(client, dispute.id, { adminId: 'admin-rej' });
+      const rejected = await disputeService.rejectDispute(client, dispute.id, {
+        adminId: 'admin-rej',
+        note: 'insufficient evidence',
+      });
+      assert.equal(rejected.status, 'rejected');
+      const { rows } = await client.query(
+        `SELECT event_type FROM auction_events WHERE auction_id = $1 AND event_type = 'dispute.rejected'`,
+        [auction.id],
+      );
+      assert.equal(rows.length, 1);
+    });
+  });
+
+  it('bid vs cancel race — terminal cancel or bid accepted', async (t) => {
+    if (!url) return t.skip('no DB');
+    let auctionId;
+    await db.withTransaction(async (client) => {
+      await wipe(client);
+      const auction = await seedLiveAuction(client);
+      auctionId = auction.id;
+    });
+    const [bidResult, cancelResult] = await Promise.all([
+      db
+        .withTransaction((client) =>
+          bidService.placeBid(client, {
+            auctionId,
+            bidderUserId: 'bidder-cancel-race',
+            amount: 1050,
+            idempotencyKey: 'cancel-race-bid',
+          }),
+        )
+        .then((r) => ({ ok: true, r }))
+        .catch((e) => ({ ok: false, code: e.code })),
+      db
+        .withTransaction((client) =>
+          opsService.adminCancelAuction(client, auctionId, { adminId: 'admin-cancel', reason: 'race' }),
+        )
+        .then((r) => ({ ok: true, r }))
+        .catch((e) => ({ ok: false, code: e.code })),
+    ]);
+    assert.ok(bidResult.ok || cancelResult.ok);
+    const { rows } = await pool.query(`SELECT status FROM auctions WHERE id = $1`, [auctionId]);
+    assert.ok(['live', 'cancelled'].includes(rows[0].status));
+  });
+
+  it('cancel vs freeze race — one wins; auction not corrupted', async (t) => {
+    if (!url) return t.skip('no DB');
+    let auctionId;
+    await db.withTransaction(async (client) => {
+      await wipe(client);
+      const auction = await seedLiveAuction(client);
+      auctionId = auction.id;
+    });
+    const results = await Promise.allSettled([
+      db.withTransaction((c) =>
+        opsService.adminCancelAuction(c, auctionId, { adminId: 'admin-cf', reason: 'race_cancel' }),
+      ),
+      db.withTransaction((c) =>
+        opsService.freezeAuction(c, auctionId, { adminId: 'admin-cf', reason: 'race_freeze' }),
+      ),
+    ]);
+    assert.ok(results.some((r) => r.status === 'fulfilled'));
+    const { rows } = await pool.query(`SELECT status FROM auctions WHERE id = $1`, [auctionId]);
+    assert.ok(['frozen', 'cancelled'].includes(rows[0].status));
+  });
+
+  it('host suspension preserves live auction and bids', async (t) => {
+    if (!url) return t.skip('no DB');
+    const hostService = require('./services/host_service');
+    await db.withTransaction(async (client) => {
+      await wipe(client);
+      const host = await hostService.registerHost(client, {
+        userId: 'host-susp-live',
+        displayName: 'Susp Host',
+      });
+      await client.query(
+        `UPDATE auction_hosts SET status = 'active', verified_at = NOW() WHERE id = $1`,
+        [host.id],
+      );
+      const auction = await seedLiveAuction(client);
+      await bidService.placeBid(client, {
+        auctionId: auction.id,
+        bidderUserId: 'bidder-susp',
+        amount: 1050,
+        idempotencyKey: 'susp-bid',
+      });
+      await hostService.suspendHost(client, host.id, 'admin-susp', 'policy');
+      const { rows: ast } = await client.query(`SELECT status FROM auctions WHERE id = $1`, [auction.id]);
+      assert.equal(ast[0].status, 'live');
+      const { rows: bids } = await client.query(`SELECT COUNT(*)::int AS c FROM bids WHERE auction_id = $1`, [
+        auction.id,
+      ]);
+      assert.equal(bids[0].c, 1);
+    });
+  });
+
+  it('risk signal acknowledge does not auto-ban', async (t) => {
+    if (!url) return t.skip('no DB');
+    await db.withTransaction(async (client) => {
+      await wipe(client);
+      const auction = await seedLiveAuction(client);
+      for (let i = 0; i < 21; i++) {
+        await bidService.placeBid(client, {
+          auctionId: auction.id,
+          bidderUserId: `ack-bidder-${i % 3}`,
+          amount: 1050 + i * 50,
+          idempotencyKey: `ack-${i}`,
+        });
+      }
+      const signals = await riskService.evaluateRiskSignals(client, auction.id);
+      const sig = signals.find((s) => s.ruleCode === 'abnormal_bid_velocity');
+      assert.ok(sig);
+      const acked = await riskService.acknowledgeRiskSignal(client, sig.id, { adminId: 'admin-risk' });
+      assert.equal(acked.acknowledged, true);
+      const placed = await bidService.placeBid(client, {
+        auctionId: auction.id,
+        bidderUserId: 'ack-bidder-new',
+        amount: 3000,
+        idempotencyKey: 'ack-after',
+      });
+      assert.ok(placed.bid.amount >= 3000);
     });
   });
 });

@@ -1,0 +1,74 @@
+=== NOMAS Auction Phase 1.1 Integration Gate ===
+UTC: 2026-08-22T18:27:58Z
+AUCTIONS_TEST_DATABASE_URL: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.46925ms)
+  ✔ V1 species gate rejects equipment/sheep (0.240416ms)
+  ✔ settlement note documents no financial completion in V1 (0.109417ms)
+  ✔ feature flag defaults OFF in backend config (0.050333ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.138667ms)
+  ✔ health payload includes auctions isolation block (0.403208ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.085083ms)
+  ✔ audio decision prefers LiveKit and documents wiring path (0.042708ms)
+  ✔ money helper rounds currency (0.060417ms)
+  ✔ anti-sniping uses effective end (1.033ms)
+✔ Auction V1 — unit (no PostgreSQL required) (3.994208ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (202.331125ms)
+  ✔ owner cannot bid — unauthorized (10.037041ms)
+  ✔ close race yields exactly one winner (44.80875ms)
+  ✔ host scheduling conflict detected (56.157042ms)
+  ✔ immutable event timeline appended (19.969667ms)
+  ✔ stale bid rejected when expectedVersion mismatches (9.350625ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (21.618334ms)
+  ✔ anti-sniping extends end when bid lands inside window (27.950583ms)
+  ✔ reserve price — unsold when top bid below reserve (13.722416ms)
+✔ Auction V1 — PostgreSQL integration (475.59025ms)
+▶ Auction flow remediation — ownership (no PostgreSQL)
+  ✔ rejects listing owned by another user (0.525334ms)
+  ✔ rejects unlinked video (0.114417ms)
+  ✔ rejects species mismatch (0.073375ms)
+  ✔ accepts valid horse listing + linked video (0.070167ms)
+✔ Auction flow remediation — ownership (no PostgreSQL) (1.380083ms)
+▶ Auction flow remediation — developer exemption env
+  ✔ no env → no bypass identity (0.102584ms)
+  ✔ only configured user id matches (0.455416ms)
+✔ Auction flow remediation — developer exemption env (0.726917ms)
+▶ Auction flow remediation — PostgreSQL integration
+  ✔ regular user cannot schedule without admin approval (14.798958ms)
+  ✔ developer owner bypass is audited and schedules without host (14.738375ms)
+  ✔ without approval events schedule is rejected (5.997958ms)
+  ✔ owner still cannot bid after remediation (10.789167ms)
+  ✔ with host — no schedule until host accepts after approval (12.033417ms)
+  ✔ Path B preserves owner; host is not owner (28.815209ms)
+  ✔ unset AUCTION_DEVELOPER_USER_ID → no developer bypass on submit-review (7.821208ms)
+  ✔ non-developer owner cannot get developer bypass when env points elsewhere (4.674875ms)
+  ✔ no-host: admin approval → scheduled (6.257125ms)
+  ✔ concurrent schedule after approval — exactly one scheduled transition (10.823625ms)
+✔ Auction flow remediation — PostgreSQL integration (145.590041ms)
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.410875ms)
+  ✔ only active+verified hosts accept bookings (0.706417ms)
+  ✔ pre-audio contract is stub only (0.441375ms)
+✔ Auction Phase 4 — host domain (unit) (2.162167ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (11.153125ms)
+  ✔ unverified host cannot accept booking requests (9.004333ms)
+  ✔ suspended host rejected for booking (8.408459ms)
+  ✔ availability overlap rejected (5.50775ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (17.054958ms)
+  ✔ Path B — host proxy draft requires owner consent; admin schedules (8.83475ms)
+  ✔ host cannot become asset owner on Path B (3.251ms)
+  ✔ concurrent booking requests — one wins for same slot (16.194375ms)
+  ✔ auction cannot schedule before admin review on host accept (10.8735ms)
+  ✔ audit timeline includes host booking events (11.380583ms)
+✔ Auction Phase 4 — host E2E (PostgreSQL) (129.086375ms)
+ℹ tests 48
+ℹ suites 7
+ℹ pass 48
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 911.143125

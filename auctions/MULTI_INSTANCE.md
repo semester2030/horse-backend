@@ -1,4 +1,4 @@
-# Auction Multi-Instance Readiness — Phase 6
+# Auction Multi-Instance Readiness — PR-01 CLOSED
 
 ## Authoritative layers
 
@@ -8,22 +8,23 @@
 | Auction transitions / close / freeze | **Yes** | Row lock + `pg_advisory_xact_lock(hashtext('nomas:auction:{id}'))` |
 | Host booking conflicts | **Yes** | Transaction + overlap queries |
 | REST read / resync | **Yes** | PostgreSQL |
-| WebSocket replay / seq | **No — P0 blocker for WS HA** | In-process `ws_hub` sequencer + replay buffer |
+| WebSocket replay / seq | **Yes** | `auction_ws_events` + `NOTIFY auction_ws_fanout` + per-instance LISTEN |
 
-## What Phase 6 added
+## PR-01 implementation
 
-- `domain/locking.js` — advisory xact lock on every auction mutation path
-- Race tests: bid↔freeze, close↔freeze across concurrent connections
+- Migration `005_ws_multi_instance.sql` — `auction_ws_events (auction_id, seq, payload)`
+- `auctions/services/ws_event_store.js` — append + replay queries
+- `ws_pg_broker.js` — `createPgAuctionWsBridge` LISTEN/fan-out
+- `ws_hub.js` — `setAuctionCrossInstance`, `publishSequenced`, PG replay on subscribe
+- Tests: `auction_ws_multi_instance.test.js`
 
 ## Production HA guidance
 
 1. **Scale REST/bid path** — safe behind load balancer (PostgreSQL is authority).
-2. **WebSocket** — requires one of:
-   - Sticky sessions to same Node instance, **or**
-   - Shared pub/sub + global seq (Redis/NATS), **or**
-   - Client REST resync only (accept WS as best-effort transport)
-3. **Do not claim Production HA** until WS replay is externalized.
+2. **WebSocket** — all instances share same `AUCTIONS_DATABASE_URL`; bridge auto-starts when auctions module ready.
+3. **WS incident** — REST GET `/auctions/:id` + replay from PG on reconnect.
 
-## WS incident runbook
+## Limitations
 
-See `docs/js/auctions.js → OPERATIONS_RUNBOOK.wsIncident`.
+- NOTIFY delivery requires live Postgres connection per instance (dedicated LISTEN client).
+- Very high event volume may need retention job on `auction_ws_events` (not V1).

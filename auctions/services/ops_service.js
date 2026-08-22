@@ -102,6 +102,7 @@ async function resumeAuction(client, auctionId, { adminId, reason } = {}) {
 }
 
 async function adminCancelAuction(client, auctionId, { adminId, reason } = {}) {
+  await acquireAuctionLock(client, auctionId);
   const row = await loadAuctionForUpdate(client, auctionId);
   if (!row) {
     const err = new Error('Auction not found');

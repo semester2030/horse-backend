@@ -51,6 +51,10 @@ const HOST_STATUSES = ['pending', 'verified', 'active', 'suspended'];
 
 const AUDIO_PROVIDER = String(process.env.AUCTION_AUDIO_PROVIDER || 'noop').toLowerCase();
 
+function getAuctionDeveloperUserId() {
+  return String(process.env.AUCTION_DEVELOPER_USER_ID || '').trim();
+}
+
 module.exports = {
   get ENABLE_AUCTIONS() {
     return isAuctionsEnabled();
@@ -68,5 +72,6 @@ module.exports = {
   RISK_SEVERITIES,
   HOST_STATUSES,
   AUDIO_PROVIDER,
+  getAuctionDeveloperUserId,
   envBool,
 };
