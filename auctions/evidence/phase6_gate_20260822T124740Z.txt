@@ -1,0 +1,278 @@
+=== NOMAS Auction Phase 6 Production Gate ===
+UTC: 2026-08-22T12:47:40Z
+
+▶ Core regression
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.734083ms)
+  ✔ V1 species gate rejects equipment/sheep (0.270458ms)
+  ✔ settlement note documents no financial completion in V1 (0.115666ms)
+  ✔ feature flag defaults OFF in backend config (0.050709ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.124458ms)
+  ✔ health payload includes auctions isolation block (0.384792ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.6505ms)
+  ✔ audio decision prefers LiveKit and documents wiring path (0.068083ms)
+  ✔ money helper rounds currency (0.076083ms)
+  ✔ anti-sniping uses effective end (1.357334ms)
+✔ Auction V1 — unit (no PostgreSQL required) (4.746208ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (21.273166ms)
+  ✔ owner cannot bid — unauthorized (8.035375ms)
+  ✔ close race yields exactly one winner (23.092625ms)
+  ✔ host scheduling conflict detected (8.808083ms)
+  ✔ immutable event timeline appended (5.195666ms)
+  ✔ stale bid rejected when expectedVersion mismatches (5.735833ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (15.924042ms)
+  ✔ anti-sniping extends end when bid lands inside window (7.096541ms)
+  ✔ reserve price — unsold when top bid below reserve (8.193333ms)
+✔ Auction V1 — PostgreSQL integration (162.765333ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 229.71825
+
+▶ Realtime regression
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.266084ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.552834ms)
+  ✔ 100 sequenced events remain ordered (0.261584ms)
+  ✔ sanitized bidder label hides full user id (0.07625ms)
+✔ Auction Phase 3 — WS hub (unit) (2.784875ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (14.038334ms)
+  ✔ unknown auction subscribe denied (0.413834ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (40.002625ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (15.59375ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (18.633083ms)
+  ✔ anti-sniping extension published as auction.extended (5.7445ms)
+  ✔ close race — exactly one winner after close (7.578084ms)
+  ✔ WS disconnect does not lose accepted DB bid (4.443458ms)
+✔ Auction Phase 3 — publish after commit (PostgreSQL integration) (58.494ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 155.663917
+
+▶ Host Phase 4 regression
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.319667ms)
+  ✔ only active+verified hosts accept bookings (0.653625ms)
+  ✔ pre-audio contract is stub only (0.446ms)
+✔ Auction Phase 4 — host domain (unit) (1.917959ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (9.044125ms)
+  ✔ unverified host cannot accept booking requests (6.827834ms)
+  ✔ suspended host rejected for booking (6.958041ms)
+  ✔ availability overlap rejected (4.668583ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (12.862333ms)
+  ✔ Path B — host proxy draft requires owner consent; admin schedules (6.815375ms)
+  ✔ host cannot become asset owner on Path B (3.320625ms)
+  ✔ concurrent booking requests — one wins for same slot (14.769792ms)
+  ✔ auction cannot schedule before admin review on host accept (11.103167ms)
+  ✔ audit timeline includes host booking events (10.227042ms)
+✔ Auction Phase 4 — host E2E (PostgreSQL) (112.485875ms)
+ℹ tests 13
+ℹ suites 2
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 164.675792
+
+▶ Audio Phase 5 regression
+▶ Auction Phase 5 — audio domain (unit)
+  ✔ audio session state machine transitions (0.837792ms)
+  ✔ audience labels map session status (0.083375ms)
+  ✔ phase5 contract enables mic for host path only (0.061292ms)
+  ✔ noop provider mints publish and subscribe tokens (0.140334ms)
+  ✔ feature flag defaults OFF (0.072667ms)
+✔ Auction Phase 5 — audio domain (unit) (1.690042ms)
+▶ Auction Phase 5 — LiveKit tokens (unit)
+  ✔ host publish token differs from audience subscribe token (69.178125ms)
+✔ Auction Phase 5 — LiveKit tokens (unit) (69.258833ms)
+▶ Auction Phase 5 — audio E2E (PostgreSQL)
+  ✔ only assigned host can prepare and start audio (25.252958ms)
+  ✔ audience receives subscribe-only token; host receives publish token (16.011666ms)
+  ✔ unverified host denied for audio prepare (8.5065ms)
+  ✔ auction must be live for host audio start (13.228958ms)
+  ✔ double start is idempotent (13.083916ms)
+  ✔ admin force-end ends session and is audited (23.044792ms)
+  ✔ provider failure does not block bidding (14.908375ms)
+  ✔ pause and resume transitions (14.5695ms)
+✔ Auction Phase 5 — audio E2E (PostgreSQL) (152.243667ms)
+ℹ tests 14
+ℹ suites 3
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 273.87925
+
+▶ Phase 6 Admin/Ops
+▶ Phase 6 — unit (no PostgreSQL)
+  ✔ frozen state machine transitions (0.683458ms)
+  ✔ RBAC least privilege for auction ops (0.148ms)
+✔ Phase 6 — unit (no PostgreSQL) (1.686042ms)
+▶ Phase 6 — PostgreSQL integration
+  ✔ review approve/reject records admin events (14.078958ms)
+  ✔ freeze prevents new bids (9.803875ms)
+  ✔ resume restores legal bidding (10.99825ms)
+  ✔ cancel is terminal audited (9.048125ms)
+  ✖ bid vs freeze race — PostgreSQL serializes (728899.922708ms)
+  ✖ close vs freeze — frozen blocks close (61.129708ms)
+  ✔ dispute lifecycle open → reviewing → resolved (1058.332375ms)
+  ✔ risk signal generation — abnormal velocity rule (2173.5395ms)
+  ✔ immutable timeline includes ops/dispute/risk events (1049.491834ms)
+  ✖ multi-instance advisory lock — concurrent connections serialize (3208.940208ms)
+  ✖ exactly one winner after close (3244.585208ms)
+  ✖ REST recovery — bids persist after freeze (12.972167ms)
+✖ Phase 6 — PostgreSQL integration (739782.209084ms)
+ℹ Error: Test hook "before" at auctions/phase6_ops.test.js:43:3 generated asynchronous activity after the test ended. This activity created the error "Error: Connection terminated unexpectedly" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ tests 14
+ℹ suites 2
+ℹ pass 9
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 739956.712834
+
+✖ failing tests:
+
+test at auctions/phase6_ops.test.js:194:3
+✖ bid vs freeze race — PostgreSQL serializes (728899.922708ms)
+  Error: Connection terminated unexpectedly
+      at Connection.<anonymous> (/Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:204:73)
+      at Object.onceWrapper (node:events:622:28)
+      at Connection.emit (node:events:508:28)
+      at Socket.<anonymous> (/Users/fayez/Desktop/horse/backend/node_modules/pg/lib/connection.js:64:12)
+      at Socket.emit (node:events:508:28)
+      at TCP.<anonymous> (node:net:346:12)
+
+test at auctions/phase6_ops.test.js:241:3
+✖ close vs freeze — frozen blocks close (61.129708ms)
+  error: update or delete on table "auctions" violates foreign key constraint "auction_events_auction_id_fkey" on table "auction_events"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:73:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:244:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:243:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 350,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(c4524321-7338-450e-bab6-90dea4c150e0) is still referenced from table "auction_events".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auction_events',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auction_events_auction_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }
+
+test at auctions/phase6_ops.test.js:323:3
+✖ multi-instance advisory lock — concurrent connections serialize (3208.940208ms)
+  error: deadlock detected
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:73:5)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:329:7)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 470,
+    severity: 'ERROR',
+    code: '40P01',
+    detail: 'Process 29739 waits for ShareLock on transaction 1557316; blocked by process 29756.\nProcess 29756 waits for ShareLock on transaction 1557312; blocked by process 29739.',
+    hint: 'See server log for query details.',
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: 'while locking tuple (0,7) in relation "auction_disputes"\nSQL statement "SELECT 1 FROM ONLY "public"."auction_disputes" x WHERE $1 OPERATOR(pg_catalog.=) "auction_id" FOR KEY SHARE OF x"',
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'deadlock.c',
+    line: '1152',
+    routine: 'DeadLockReport'
+  }
+
+test at auctions/phase6_ops.test.js:361:3
+✖ exactly one winner after close (3244.585208ms)
+  error: update or delete on table "auctions" violates foreign key constraint "auction_disputes_auction_id_fkey" on table "auction_disputes"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:73:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:364:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:363:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 360,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(81a0fbb8-bdb2-492c-80f5-58e7d5f6fdf8) is still referenced from table "auction_disputes".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auction_disputes',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auction_disputes_auction_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }
+
+test at auctions/phase6_ops.test.js:382:3
+✖ REST recovery — bids persist after freeze (12.972167ms)
+  error: update or delete on table "auctions" violates foreign key constraint "auction_disputes_auction_id_fkey" on table "auction_disputes"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:73:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:385:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/phase6_ops.test.js:384:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 360,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(f766840e-69bc-45d2-893f-8dbce5e2b3ac) is still referenced from table "auction_disputes".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auction_disputes',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auction_disputes_auction_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }

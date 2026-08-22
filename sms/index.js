@@ -25,10 +25,16 @@ function isConfigured() {
   return Boolean(activeProvider());
 }
 
+function isProductionEnv() {
+  return String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+}
+
+/** Dev-only OTP expose. Always false in production; default false elsewhere. */
 function exposeDevCodeOnScreen() {
+  if (isProductionEnv()) return false;
   if (isConfigured()) return false;
-  const flag = String(process.env.OTP_EXPOSE_CODE || 'true').toLowerCase();
-  return flag !== 'false' && flag !== '0' && flag !== 'no';
+  const flag = String(process.env.OTP_EXPOSE_CODE || 'false').toLowerCase();
+  return flag === 'true' || flag === '1' || flag === 'yes';
 }
 
 function status() {

@@ -1,0 +1,89 @@
+=== NOMAS Auction Phase 4 Host Gate ===
+UTC: 2026-08-22T12:15:26Z
+
+▶ Core regression
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.41575ms)
+  ✔ V1 species gate rejects equipment/sheep (0.346458ms)
+  ✔ settlement note documents no financial completion in V1 (0.120083ms)
+  ✔ feature flag defaults OFF in backend config (0.057875ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.124542ms)
+  ✔ health payload includes auctions isolation block (0.387625ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.70225ms)
+  ✔ audio decision prefers LiveKit but wired=false without credentials (0.099208ms)
+  ✔ money helper rounds currency (0.086667ms)
+  ✔ anti-sniping uses effective end (1.004542ms)
+✔ Auction V1 — unit (no PostgreSQL required) (4.001875ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (16.189208ms)
+  ✔ owner cannot bid — unauthorized (7.071709ms)
+  ✔ close race yields exactly one winner (19.318709ms)
+  ✔ host scheduling conflict detected (9.258834ms)
+  ✔ immutable event timeline appended (5.878625ms)
+  ✔ stale bid rejected when expectedVersion mismatches (5.58575ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (14.945625ms)
+  ✔ anti-sniping extends end when bid lands inside window (9.18025ms)
+  ✔ reserve price — unsold when top bid below reserve (9.922333ms)
+✔ Auction V1 — PostgreSQL integration (123.050291ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 179.679292
+
+▶ Realtime regression
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.32525ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.499583ms)
+  ✔ 100 sequenced events remain ordered (0.258458ms)
+  ✔ sanitized bidder label hides full user id (0.077375ms)
+✔ Auction Phase 3 — WS hub (unit) (2.684333ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (20.671625ms)
+  ✔ unknown auction subscribe denied (0.666709ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (46.135209ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (16.400958ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (14.037708ms)
+  ✔ anti-sniping extension published as auction.extended (6.435833ms)
+  ✔ close race — exactly one winner after close (8.100708ms)
+  ✔ WS disconnect does not lose accepted DB bid (5.370583ms)
+✔ Auction Phase 3 — publish after commit (PostgreSQL integration) (56.9615ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 159.614083
+
+▶ Host Phase 4
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.300709ms)
+  ✔ only active+verified hosts accept bookings (0.651ms)
+  ✔ pre-audio contract is stub only (0.067291ms)
+✔ Auction Phase 4 — host domain (unit) (1.467542ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (8.700834ms)
+  ✔ unverified host cannot accept booking requests (6.921667ms)
+  ✔ suspended host rejected for booking (6.029875ms)
+  ✔ availability overlap rejected (4.594583ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (11.715208ms)
+  ✔ Path B — host proxy draft requires owner consent; admin schedules (8.552917ms)
+  ✔ host cannot become asset owner on Path B (3.926041ms)
+  ✔ concurrent booking requests — one wins for same slot (14.489917ms)
+  ✔ auction cannot schedule before admin review on host accept (10.653083ms)
+  ✔ audit timeline includes host booking events (10.512834ms)
+✔ Auction Phase 4 — host E2E (PostgreSQL) (112.544375ms)
+ℹ tests 13
+ℹ suites 2
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 162.941292

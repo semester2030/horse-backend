@@ -15,6 +15,9 @@ services:
         value: /var/data
       - key: NODE_ENV
         value: production
+      # اضبط في لوحة Render (لا ترفع القيم إلى Git):
+      # PRIVILEGED_PHONES, ENABLE_AUCTIONS, AUCTIONS_DATABASE_URL,
+      # OTP_DEV_PHONES, OTP_DEV_CODE (اختياري للمطوّر)
     disk:
       name: horse-store
       mountPath: /var/data

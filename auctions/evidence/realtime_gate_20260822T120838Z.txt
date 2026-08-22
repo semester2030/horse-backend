@@ -1,0 +1,92 @@
+=== NOMAS Auction Phase 3 Realtime Gate ===
+UTC: 2026-08-22T12:08:38Z
+AUCTIONS_TEST_DATABASE_URL: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Core regression (Phase 1.1)
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.596083ms)
+  ✔ V1 species gate rejects equipment/sheep (0.260792ms)
+  ✔ settlement note documents no financial completion in V1 (0.1115ms)
+  ✔ feature flag defaults OFF in backend config (0.049917ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.138ms)
+  ✔ health payload includes auctions isolation block (1.0835ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.094875ms)
+  ✔ audio decision prefers LiveKit but wired=false without credentials (0.052459ms)
+  ✔ money helper rounds currency (0.066875ms)
+  ✔ anti-sniping uses effective end (1.500667ms)
+✔ Auction V1 — unit (no PostgreSQL required) (5.480333ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (25.786834ms)
+  ✔ owner cannot bid — unauthorized (7.698959ms)
+  ✔ close race yields exactly one winner (19.298042ms)
+  ✔ host scheduling conflict detected (7.565958ms)
+  ✔ immutable event timeline appended (6.560667ms)
+  ✔ stale bid rejected when expectedVersion mismatches (6.024708ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (12.558458ms)
+  ✔ anti-sniping extends end when bid lands inside window (15.969541ms)
+  ✔ reserve price — unsold when top bid below reserve (8.241167ms)
+✔ Auction V1 — PostgreSQL integration (165.566167ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 241.649
+
+▶ Realtime gate (Phase 3)
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.331083ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.815584ms)
+  ✔ 100 sequenced events remain ordered (0.254375ms)
+  ✔ sanitized bidder label hides full user id (0.072333ms)
+✔ Auction Phase 3 — WS hub (unit) (2.980542ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (16.900875ms)
+  ✔ unknown auction subscribe denied (0.398375ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (40.386416ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (19.850292ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (12.298959ms)
+  ✔ anti-sniping extension published as auction.extended (6.557958ms)
+  ✖ close race — exactly one winner after close (3.902959ms)
+  ✔ WS disconnect does not lose accepted DB bid (4.714208ms)
+✖ Auction Phase 3 — publish after commit (PostgreSQL integration) (53.336958ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 151.49425
+
+✖ failing tests:
+
+test at auctions/auction_realtime.test.js:328:3
+✖ close race — exactly one winner after close (3.902959ms)
+  error: new row for relation "auctions" violates check constraint "auctions_check"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/auction_realtime.test.js:341:24)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 511,
+    severity: 'ERROR',
+    code: '23514',
+    detail: 'Failing row contains (72338bf4-993a-4dcd-8a4b-8b4b623938c9, 765dc2bb-1a8d-4604-83a7-1ae90d51d653, owner-close, owner-close, seller, null, horse, live, 1000.00, 100.00, null, 1000.00, 1, 2026-08-22 15:08:38.96751+03, 2026-08-22 15:08:37.966+03, null, 30, null, null, note, null, 2026-08-22 15:08:38.96751+03, 2026-08-22 15:08:38.96751+03).',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auctions',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auctions_check',
+    file: 'execMain.c',
+    line: '1942',
+    routine: 'ExecConstraints'
+  }

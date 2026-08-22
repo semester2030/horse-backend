@@ -17,9 +17,10 @@ function region() {
 }
 
 function exposeDevCodeOnScreen() {
+  if (String(process.env.NODE_ENV || '').toLowerCase() === 'production') return false;
   if (isConfigured()) return false;
-  const flag = String(process.env.OTP_EXPOSE_CODE || 'true').toLowerCase();
-  return flag !== 'false' && flag !== '0' && flag !== 'no';
+  const flag = String(process.env.OTP_EXPOSE_CODE || 'false').toLowerCase();
+  return flag === 'true' || flag === '1' || flag === 'yes';
 }
 
 function status() {

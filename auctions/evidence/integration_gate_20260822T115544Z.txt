@@ -1,0 +1,35 @@
+=== NOMAS Auction Phase 1.1 Integration Gate ===
+UTC: 2026-08-22T11:55:44Z
+AUCTIONS_TEST_DATABASE_URL: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.42375ms)
+  ✔ V1 species gate rejects equipment/sheep (0.229917ms)
+  ✔ settlement note documents no financial completion in V1 (0.10575ms)
+  ✔ feature flag defaults OFF in backend config (0.048ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.114292ms)
+  ✔ health payload includes auctions isolation block (0.399291ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.104083ms)
+  ✔ audio decision prefers LiveKit but wired=false without credentials (0.05225ms)
+  ✔ money helper rounds currency (0.070708ms)
+  ✔ anti-sniping uses effective end (1.077541ms)
+✔ Auction V1 — unit (no PostgreSQL required) (3.717791ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (12.646667ms)
+  ✔ owner cannot bid — unauthorized (6.0685ms)
+  ✔ close race yields exactly one winner (15.767042ms)
+  ✔ host scheduling conflict detected (6.549291ms)
+  ✔ immutable event timeline appended (5.10625ms)
+  ✔ stale bid rejected when expectedVersion mismatches (4.892666ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (12.211708ms)
+  ✔ anti-sniping extends end when bid lands inside window (7.886458ms)
+  ✔ reserve price — unsold when top bid below reserve (7.964209ms)
+✔ Auction V1 — PostgreSQL integration (107.754042ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 165.986041

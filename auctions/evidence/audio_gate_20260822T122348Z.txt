@@ -1,0 +1,171 @@
+=== NOMAS Auction Phase 5 Audio Gate ===
+UTC: 2026-08-22T12:23:48Z
+
+▶ Core regression
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.657584ms)
+  ✔ V1 species gate rejects equipment/sheep (0.253583ms)
+  ✔ settlement note documents no financial completion in V1 (0.1125ms)
+  ✔ feature flag defaults OFF in backend config (0.049ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.452166ms)
+  ✔ health payload includes auctions isolation block (1.198833ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.12025ms)
+  ✔ audio decision prefers LiveKit and documents wiring path (0.091917ms)
+  ✔ money helper rounds currency (0.221292ms)
+  ✔ anti-sniping uses effective end (1.017166ms)
+✔ Auction V1 — unit (no PostgreSQL required) (5.464958ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (18.607292ms)
+  ✔ owner cannot bid — unauthorized (7.933958ms)
+  ✔ close race yields exactly one winner (19.581792ms)
+  ✔ host scheduling conflict detected (9.905334ms)
+  ✔ immutable event timeline appended (6.463625ms)
+  ✔ stale bid rejected when expectedVersion mismatches (5.968916ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (13.582542ms)
+  ✔ anti-sniping extends end when bid lands inside window (9.095583ms)
+  ✔ reserve price — unsold when top bid below reserve (9.893291ms)
+✔ Auction V1 — PostgreSQL integration (149.261125ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 210.747333
+
+▶ Realtime regression
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.286417ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.70875ms)
+  ✔ 100 sequenced events remain ordered (0.285541ms)
+  ✔ sanitized bidder label hides full user id (0.075458ms)
+✔ Auction Phase 3 — WS hub (unit) (2.842084ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (12.630417ms)
+  ✔ unknown auction subscribe denied (0.432542ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (37.284542ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (14.793417ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (13.45575ms)
+  ✔ anti-sniping extension published as auction.extended (5.626125ms)
+  ✔ close race — exactly one winner after close (7.567542ms)
+  ✔ WS disconnect does not lose accepted DB bid (4.285875ms)
+✔ Auction Phase 3 — publish after commit (PostgreSQL integration) (52.042291ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 144.751125
+
+▶ Host Phase 4 regression
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.413ms)
+  ✔ only active+verified hosts accept bookings (0.63675ms)
+  ✔ pre-audio contract is stub only (0.430417ms)
+✔ Auction Phase 4 — host domain (unit) (1.968583ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (7.833625ms)
+  ✔ unverified host cannot accept booking requests (6.578292ms)
+  ✔ suspended host rejected for booking (6.51675ms)
+  ✔ availability overlap rejected (4.72275ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (10.5265ms)
+  ✔ Path B — host proxy draft requires owner consent; admin schedules (5.903833ms)
+  ✔ host cannot become asset owner on Path B (3.032875ms)
+  ✔ concurrent booking requests — one wins for same slot (14.922584ms)
+  ✔ auction cannot schedule before admin review on host accept (10.497458ms)
+  ✔ audit timeline includes host booking events (9.498917ms)
+✔ Auction Phase 4 — host E2E (PostgreSQL) (106.723083ms)
+ℹ tests 13
+ℹ suites 2
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 158.316125
+
+▶ Audio Phase 5
+▶ Auction Phase 5 — audio domain (unit)
+  ✔ audio session state machine transitions (0.712125ms)
+  ✔ audience labels map session status (0.084208ms)
+  ✔ phase5 contract enables mic for host path only (0.060125ms)
+  ✔ noop provider mints publish and subscribe tokens (0.132584ms)
+  ✔ feature flag defaults OFF (0.060041ms)
+✔ Auction Phase 5 — audio domain (unit) (1.578333ms)
+▶ Auction Phase 5 — LiveKit tokens (unit)
+  ✔ host publish token differs from audience subscribe token (36.599125ms)
+✔ Auction Phase 5 — LiveKit tokens (unit) (36.666084ms)
+▶ Auction Phase 5 — audio E2E (PostgreSQL)
+  ✔ only assigned host can prepare and start audio (24.736333ms)
+  ✔ audience receives subscribe-only token; host receives publish token (16.098ms)
+  ✖ unverified host denied for audio prepare (4.699916ms)
+  ✖ auction must be live for host audio start (10.95525ms)
+  ✔ double start is idempotent (13.505333ms)
+  ✔ admin force-end ends session and is audited (12.027167ms)
+  ✖ provider failure does not block bidding (13.763833ms)
+  ✔ pause and resume transitions (11.526375ms)
+✖ Auction Phase 5 — audio E2E (PostgreSQL) (130.777333ms)
+ℹ tests 14
+ℹ suites 3
+ℹ pass 11
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 219.9815
+
+✖ failing tests:
+
+test at auctions/audio_phase5.test.js:232:3
+✖ unverified host denied for audio prepare (4.699916ms)
+  Error: Invalid transition draft → live
+      at Object.transitionAuction (/Users/fayez/Desktop/horse/backend/auctions/services/auction_service.js:171:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/audio_phase5.test.js:258:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/audio_phase5.test.js:234:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    code: 'AUCTION_TRANSITION_INVALID',
+    status: 409
+  }
+
+test at auctions/audio_phase5.test.js:268:3
+✖ auction must be live for host audio start (10.95525ms)
+  Error: Invalid transition live → scheduled
+      at Object.transitionAuction (/Users/fayez/Desktop/horse/backend/auctions/services/auction_service.js:171:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/audio_phase5.test.js:273:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/audio_phase5.test.js:270:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    code: 'AUCTION_TRANSITION_INVALID',
+    status: 409
+  }
+
+test at auctions/audio_phase5.test.js:317:3
+✖ provider failure does not block bidding (13.763833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 1100
+  
+      at /Users/fayez/Desktop/horse/backend/auctions/audio_phase5.test.js:344:14
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/audio_phase5.test.js:319:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

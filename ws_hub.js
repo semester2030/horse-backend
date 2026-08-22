@@ -161,8 +161,13 @@ function createRoomSequencer(replayWindow) {
   return { assignAndStore, replayAfter, currentSeq, _streams: streams };
 }
 
+function isSequencedRoom(room) {
+  const r = String(room);
+  return r.startsWith('request:') || r.startsWith('auction:');
+}
+
 function createWsHub(options = {}) {
-  const { resolveUserFromToken } = options;
+  const { resolveUserFromToken, canSubscribeRoom } = options;
   const cfg = options.config || getTransportConfig();
   const replayWindow = cfg.wsReplayWindow;
   const heartbeatMs = cfg.wsHeartbeatMs;
@@ -223,6 +228,72 @@ function createWsHub(options = {}) {
    * Assign one seq on request:{id} stream, fan-out identical sequenced event.
    * Guarantees Offer → Counter → Accept → Reject → Withdraw → Expire order.
    */
+  /**
+   * Phase 3 — sequenced auction room stream (transport only; REST/Postgres truth).
+   */
+  function publishAuction(event) {
+    const auctionId = event.auctionId;
+    if (!auctionId) return event;
+    const room = `auction:${auctionId}`;
+    const sequenced = sequencer.assignAndStore(room, {
+      ...event,
+      serverTimestamp: event.serverTimestamp || new Date().toISOString(),
+    });
+    publish(room, sequenced);
+    return sequenced;
+  }
+
+  function handleSequencedSubscribe(client, room, data, { resume = false } = {}) {
+    if (!isSequencedRoom(room)) return;
+    const run = async () => {
+      if (canSubscribeRoom) {
+        let allowed = false;
+        try {
+          allowed = await canSubscribeRoom(client, room);
+        } catch (_) {
+          allowed = false;
+        }
+        if (!allowed) {
+          safeSend(client, {
+            type: 'subscribe.denied',
+            room,
+            code: 'SUBSCRIBE_FORBIDDEN',
+          });
+          return;
+        }
+      }
+      joinRoom(client, room);
+      const last =
+        data.lastReceivedSequence != null
+          ? Number(data.lastReceivedSequence)
+          : data.lastSeq != null
+            ? Number(data.lastSeq)
+            : 0;
+      const floor = Number.isFinite(last) ? last : 0;
+      client.lastReceivedSequenceByRoom.set(room, floor);
+      if (resume) {
+        safeSend(client, {
+          type: 'resume.ack',
+          room,
+          connectionId: client.connectionId,
+          lastReceivedSequence: floor,
+          currentSeq: sequencer.currentSeq(room),
+        });
+      } else {
+        safeSend(client, {
+          type: 'subscribed',
+          room,
+          connectionId: client.connectionId,
+          currentSeq: sequencer.currentSeq(room),
+        });
+      }
+      if (Number.isFinite(floor) && floor >= 0) {
+        replayToClient(client, room, floor);
+      }
+    };
+    void run();
+  }
+
   function publishNegotiation(event) {
     const requestId = event.requestId;
     if (!requestId) {
@@ -399,50 +470,10 @@ function createWsHub(options = {}) {
           continue;
         }
         if (data.type === 'subscribe' && data.room) {
-          const room = String(data.room);
-          if (room.startsWith('request:')) {
-            joinRoom(client, room);
-            const last =
-              data.lastReceivedSequence != null
-                ? Number(data.lastReceivedSequence)
-                : data.lastSeq != null
-                  ? Number(data.lastSeq)
-                  : 0;
-            client.lastReceivedSequenceByRoom.set(
-              room,
-              Number.isFinite(last) ? last : 0,
-            );
-            safeSend(client, {
-              type: 'subscribed',
-              room,
-              connectionId: client.connectionId,
-              currentSeq: sequencer.currentSeq(room),
-            });
-            if (Number.isFinite(last) && last >= 0) {
-              replayToClient(client, room, last);
-            }
-          }
+          handleSequencedSubscribe(client, String(data.room), data, { resume: false });
         }
         if (data.type === 'resume' && data.room) {
-          const room = String(data.room);
-          if (room.startsWith('request:')) {
-            joinRoom(client, room);
-            const last = Number(
-              data.lastReceivedSequence != null
-                ? data.lastReceivedSequence
-                : data.lastSeq,
-            );
-            const floor = Number.isFinite(last) ? last : 0;
-            client.lastReceivedSequenceByRoom.set(room, floor);
-            safeSend(client, {
-              type: 'resume.ack',
-              room,
-              connectionId: client.connectionId,
-              lastReceivedSequence: floor,
-              currentSeq: sequencer.currentSeq(room),
-            });
-            replayToClient(client, room, floor);
-          }
+          handleSequencedSubscribe(client, String(data.room), data, { resume: true });
         }
       }
     });
@@ -463,11 +494,14 @@ function createWsHub(options = {}) {
     handleUpgrade,
     publish,
     publishNegotiation,
+    publishAuction,
     replayAfter: sequencer.replayAfter,
     currentSeq: sequencer.currentSeq,
     clientCount: () => clients.size,
     _sequencer: sequencer,
+    _rooms: rooms,
+    _joinRoom: joinRoom,
   };
 }
 
-module.exports = { createWsHub, createRoomSequencer };
+module.exports = { createWsHub, createRoomSequencer, isSequencedRoom };

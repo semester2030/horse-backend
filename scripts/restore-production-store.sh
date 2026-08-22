@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STORE_FILE="${1:-$ROOT/data/store.json}"
 BASE_URL="${RENDER_BACKEND_URL:-https://horse-backend-i68h.onrender.com}"
-ADMIN_KEY="${ADMIN_SECRET:-admin123}"
+ADMIN_KEY="${ADMIN_SECRET:?Set ADMIN_SECRET in the environment — no insecure default}"
 
 if [[ ! -f "$STORE_FILE" ]]; then
   echo "ملف غير موجود: $STORE_FILE" >&2

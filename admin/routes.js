@@ -1090,6 +1090,18 @@ function createAdminRouter(ctx) {
     res.json(paginate(list, req.query.page, req.query.limit));
   });
 
+  try {
+    const { registerAuctionAdminRoutes } = require('../auctions/routes');
+    registerAuctionAdminRoutes(router, {
+      ...ctx,
+      requireAdminAuth,
+      requirePerm,
+      logAudit,
+    });
+  } catch (e) {
+    console.warn('[auctions] admin routes skip:', e.message);
+  }
+
   return router;
 }
 

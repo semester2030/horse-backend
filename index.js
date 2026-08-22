@@ -55,6 +55,12 @@ const { registerGeoDiscoveryRoutes } = require('./geo_discovery');
 const { createWsHub } = require('./ws_hub');
 const marketplaceCommerce = require('./marketplace_commerce');
 const opsNotify = require('./ops_notify');
+const {
+  initAuctionsModule,
+  registerAuctions,
+  ENABLE_AUCTIONS,
+  isDbConfigured: isAuctionsDbConfigured,
+} = require('./auctions');
 
 let swaggerDocument;
 try {
@@ -105,12 +111,45 @@ function storagePersistenceStatus() {
   };
 }
 const VERIFICATION_DIR = path.join(DATA_DIR, 'verification');
-const ADMIN_JWT_SECRET =
-  process.env.ADMIN_JWT_SECRET || process.env.ADMIN_SECRET || 'nomas-admin-jwt-change-me';
+
+function isProductionEnv() {
+  return String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+}
+
+/** No hardcoded secret fallbacks. Production refuses to boot without secrets. */
+function resolveRequiredSecret(name, { allowAdminSecretAlias = false } = {}) {
+  const direct = String(process.env[name] || '').trim();
+  if (direct) return direct;
+  if (allowAdminSecretAlias) {
+    const alias = String(process.env.ADMIN_SECRET || '').trim();
+    if (alias) return alias;
+  }
+  if (isProductionEnv()) {
+    console.error(`[FATAL] Missing required secret: ${name}`);
+    process.exit(1);
+  }
+  return '';
+}
+
+const ADMIN_SECRET = resolveRequiredSecret('ADMIN_SECRET');
+const ADMIN_JWT_SECRET = resolveRequiredSecret('ADMIN_JWT_SECRET', {
+  allowAdminSecretAlias: true,
+});
+
+if (isProductionEnv()) {
+  const expose = String(process.env.OTP_EXPOSE_CODE || 'false').toLowerCase();
+  if (expose === 'true' || expose === '1' || expose === 'yes') {
+    console.error('[FATAL] OTP_EXPOSE_CODE must be false in production');
+    process.exit(1);
+  }
+  process.env.OTP_EXPOSE_CODE = 'false';
+}
+
 const { createAdminRouter, registerAppVerificationRoutes } = require('./admin/routes');
 const { seedSuperAdmin } = require('./admin/auth');
 const heritageTB = require('./heritage_tags_badges');
 const { createExpertsApi } = require('./experts');
+const otpRateLimit = require('./otp_rate_limit');
 
 function ensureDataMigrated() {
   if (fs.existsSync(DATA_FILE)) return;
@@ -525,7 +564,27 @@ function issueAuthForUser(user) {
 // توكن بسيط (للاستبدال لاحقاً بـ JWT إن رغبت)
 const token = () => `tk_${id()}`;
 
-app.use(cors());
+const CORS_ORIGINS = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Mobile / native clients typically send no Origin.
+      if (!origin) return callback(null, true);
+      if (CORS_ORIGINS.length === 0) {
+        if (isProductionEnv()) {
+          return callback(null, false);
+        }
+        return callback(null, true);
+      }
+      if (CORS_ORIGINS.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+  }),
+);
 app.use(express.json());
 
 // مقاييس زمن استجابة API
@@ -603,7 +662,7 @@ app.get('/media/public/stream-customer-hash', (req, res) => {
 
 app.get('/health', (req, res) => {
   const persistenceInfo = storagePersistenceStatus();
-  res.json({
+  const payload = {
     ok: true,
     storage: {
       ...persistenceInfo,
@@ -612,9 +671,27 @@ app.get('/health', (req, res) => {
       catalogItems: store.catalogItems.size,
       videos: store.videos.size,
     },
-    sms: smsOtp.status(),
-    otpDev: otpDev.status(),
-  });
+    sms: {
+      configured: smsOtp.status().configured,
+      provider: smsOtp.status().provider || null,
+    },
+    deployment: {
+      singleInstanceRequired: true,
+      reason:
+        'JSON file store + in-process locks/rate-limits are not multi-instance safe. Do not claim HA readiness.',
+      haReady: false,
+    },
+    auctions: {
+      enabled: ENABLE_AUCTIONS,
+      postgresConfigured: isAuctionsDbConfigured(),
+      storeReleaseImpact: ENABLE_AUCTIONS ? 'isolated module' : 'none — feature OFF',
+    },
+  };
+  if (!isProductionEnv()) {
+    payload.otpDev = otpDev.status();
+    payload.smsDetail = smsOtp.status();
+  }
+  res.json(payload);
 });
 
 // ========== Middleware: التحقق من التوكن (يجب تعريفه قبل المسارات التي تستخدمه) ==========
@@ -649,7 +726,14 @@ function requireSessionUser(req, res, next) {
 // لوحة الإدارة v2 API
 app.use('/admin/v2', createAdminRouter(adminCtx));
 registerAppVerificationRoutes(app, adminCtx, auth, requireSessionUser);
-registerAccountLifecycleRoutes(app, { store, saveStore, auth, requireSessionUser });
+registerAccountLifecycleRoutes(app, {
+  store,
+  saveStore,
+  auth,
+  requireSessionUser,
+  otpCodes,
+  setupTokens,
+});
 registerContentModerationRoutes(app, { store, saveStore, id, auth, requireSessionUser });
 
 const expertsApi = createExpertsApi({
@@ -753,6 +837,16 @@ app.post('/auth/otp/send', async (req, res) => {
       message: `رقم الجوال غير صالح (${c.placeholder})`,
     });
   }
+  const rate = otpRateLimit.checkOtpSend(req, phone);
+  if (!rate.ok) {
+    return res.status(rate.status).json({ message: rate.message, code: rate.code });
+  }
+  if (isProductionEnv() && otpDev.codeForPhone(phone)) {
+    return res.status(403).json({
+      message: 'تجاوز المطوّر غير مسموح في الإنتاج',
+      code: 'OTP_DEV_DISABLED_IN_PRODUCTION',
+    });
+  }
   const devBypassCode = otpDev.codeForPhone(phone);
   const code = devBypassCode || otpSixDigits();
   otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
@@ -816,10 +910,16 @@ app.post('/auth/otp/verify', (req, res) => {
   if (!phone || code.length < 4) {
     return res.status(400).json({ message: 'رقم الجوال ورمز التحقق مطلوبان' });
   }
+  const lock = otpRateLimit.checkOtpVerifyAllowed(phone);
+  if (!lock.ok) {
+    return res.status(lock.status).json({ message: lock.message, code: lock.code });
+  }
   const entry = otpCodes.get(phone);
   if (!entry || entry.expiresAt < Date.now() || entry.code !== code) {
+    otpRateLimit.recordOtpVerifyFailure(phone);
     return res.status(401).json({ message: 'رمز التحقق غير صحيح أو منتهي' });
   }
+  otpRateLimit.clearOtpVerifyFailures(phone);
   otpCodes.delete(phone);
   const existing = findUserByPhone(phone);
   if (existing) {
@@ -953,8 +1053,10 @@ function sessionUserIdFromToken(t) {
 }
 
 // ========== Middleware: صلاحيات الإدارة (كلمة سر الإدارة) ==========
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'admin123';
 const requireAdmin = (req, res, next) => {
+  if (!ADMIN_SECRET) {
+    return res.status(503).json({ message: 'ADMIN_SECRET غير مضبوط على الخادم' });
+  }
   const key = req.headers['x-admin-key'] || req.query.adminKey || '';
   if (key !== ADMIN_SECRET) {
     return res.status(403).json({ message: 'صلاحية الإدارة مطلوبة' });
@@ -963,7 +1065,7 @@ const requireAdmin = (req, res, next) => {
 };
 
 // ========== Users ==========
-app.get('/users', auth, (req, res) => {
+app.get('/users', requireAdmin, (req, res) => {
   const list = [...store.users.values()].map(u => {
     const { password, ...rest } = u;
     return rest;
@@ -971,14 +1073,23 @@ app.get('/users', auth, (req, res) => {
   res.json(list);
 });
 
-app.get('/users/:id', auth, (req, res) => {
+app.get('/users/:id', auth, requireSessionUser, (req, res) => {
+  const isSelf = String(req.params.id) === String(req.authUserId);
+  const adminKey = req.headers['x-admin-key'] || '';
+  const isAdmin = Boolean(ADMIN_SECRET) && adminKey === ADMIN_SECRET;
+  if (!isSelf && !isAdmin) {
+    return res.status(403).json({ message: 'غير مسموح', code: 'USERS_FORBIDDEN' });
+  }
   const u = store.users.get(req.params.id);
   if (!u) return res.status(404).json({ message: 'المستخدم غير موجود' });
   const { password, ...rest } = u;
   res.json(rest);
 });
 
-app.put('/users/:id', auth, (req, res) => {
+app.put('/users/:id', auth, requireSessionUser, (req, res) => {
+  if (String(req.params.id) !== String(req.authUserId)) {
+    return res.status(403).json({ message: 'غير مسموح بتعديل مستخدم آخر', code: 'USERS_FORBIDDEN' });
+  }
   const { id } = req.params;
   const body = { ...req.body, id, updatedAt: new Date().toISOString() };
   const existing = store.users.get(id);
@@ -1144,33 +1255,46 @@ app.patch('/horses/:id', auth, requireSessionUser, (req, res) => {
 });
 
 // ========== Favorites ==========
-app.get('/favorites/:userId', auth, (req, res) => {
+function requireFavoritesOwner(req, res, next) {
+  if (!req.authUserId) {
+    return res.status(401).json({ message: 'مطلوب تسجيل الدخول' });
+  }
+  if (String(req.params.userId) !== String(req.authUserId)) {
+    return res.status(403).json({ message: 'غير مسموح بالوصول لمفضلات مستخدم آخر', code: 'FAVORITES_IDOR' });
+  }
+  next();
+}
+
+app.get('/favorites/:userId', auth, requireSessionUser, requireFavoritesOwner, (req, res) => {
   const fav = store.favorites.get(req.params.userId) || { horseIds: [] };
   res.json({ horseIds: fav.horseIds || [], horse_ids: fav.horseIds || [] });
 });
 
-app.patch('/favorites/:userId', auth, (req, res) => {
+app.patch('/favorites/:userId', auth, requireSessionUser, requireFavoritesOwner, (req, res) => {
   const { userId } = req.params;
   const horseIds = req.body.horseIds || req.body.horse_ids || [];
   store.favorites.set(userId, { userId, horseIds, updatedAt: new Date().toISOString() });
+  saveStore();
   res.json({ horseIds });
 });
 
-app.post('/favorites/:userId/items', auth, (req, res) => {
+app.post('/favorites/:userId/items', auth, requireSessionUser, requireFavoritesOwner, (req, res) => {
   const { userId } = req.params;
   const { horseId } = req.body || {};
   const fav = store.favorites.get(userId) || { horseIds: [] };
   const horseIds = [...(fav.horseIds || [])];
   if (horseId && !horseIds.includes(horseId)) horseIds.push(horseId);
   store.favorites.set(userId, { userId, horseIds, updatedAt: new Date().toISOString() });
+  saveStore();
   res.status(201).json({ horseIds });
 });
 
-app.delete('/favorites/:userId/items/:horseId', auth, (req, res) => {
+app.delete('/favorites/:userId/items/:horseId', auth, requireSessionUser, requireFavoritesOwner, (req, res) => {
   const { userId, horseId } = req.params;
   const fav = store.favorites.get(userId) || { horseIds: [] };
   const horseIds = (fav.horseIds || []).filter(id => id !== horseId);
   store.favorites.set(userId, { userId, horseIds, updatedAt: new Date().toISOString() });
+  saveStore();
   res.json({ horseIds });
 });
 
@@ -1811,6 +1935,45 @@ const wsHub = createWsHub({
     if (!raw) return null;
     return roles.migrateLegacyUser({ ...raw });
   },
+  canSubscribeRoom(client, room) {
+    if (!String(room).startsWith('auction:')) return true;
+    const auctionId = String(room).slice('auction:'.length);
+    if (!auctionId) return false;
+    try {
+      const { createAuctionRealtime } = require('./auctions/realtime/auction_realtime');
+      const auctionDb = require('./auctions/db');
+      if (!auctionDb.isDbConfigured()) return false;
+      const rt = createAuctionRealtime({
+        wsHub: null,
+        getPool: () => auctionDb.getPool(),
+      });
+      return rt.canSubscribe(client.userId, auctionId);
+    } catch (_) {
+      return false;
+    }
+  },
+});
+
+let auctionRealtime = null;
+try {
+  const { createAuctionRealtime } = require('./auctions/realtime/auction_realtime');
+  const auctionDb = require('./auctions/db');
+  auctionRealtime = createAuctionRealtime({
+    wsHub,
+    getPool: () => auctionDb.getPool(),
+  });
+} catch (_) {
+  auctionRealtime = null;
+}
+
+registerAuctions(app, {
+  auth,
+  requireSessionUser,
+  store,
+  saveStore,
+  id,
+  wsHub,
+  auctionRealtime,
 });
 
 registerNegotiationRoutes(app, {
@@ -3639,11 +3802,19 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
   }
 });
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   console.log(`باك اند العاديات يعمل على http://localhost:${PORT}`);
   console.log(`WebSocket: ws://localhost:${PORT}/ws?token=…`);
   console.log(`للجهاز الفعلي على نفس الواي فاي: http://horse-backend.local:${PORT} (mDNS)`);
   console.log(`توثيق API (Swagger): http://localhost:${PORT}/api-docs`);
+  try {
+    const auctionsBoot = await initAuctionsModule();
+    if (auctionsBoot.enabled) {
+      console.log(`[auctions] enabled=${auctionsBoot.enabled} ready=${auctionsBoot.ready}`);
+    }
+  } catch (e) {
+    console.error('[auctions] init failed:', e.message);
+  }
   const sms = smsOtp.status();
   if (sms.configured) {
     console.log(`[SMS] مفعّل عبر ${sms.provider}${sms.sender ? ` sender=${sms.sender}` : ''}`);

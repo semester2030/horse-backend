@@ -1,0 +1,241 @@
+=== NOMAS Auction Phase 4 Host Gate ===
+UTC: 2026-08-22T12:15:15Z
+
+▶ Core regression
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.776ms)
+  ✔ V1 species gate rejects equipment/sheep (0.31475ms)
+  ✔ settlement note documents no financial completion in V1 (0.133875ms)
+  ✔ feature flag defaults OFF in backend config (0.056709ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.145ms)
+  ✔ health payload includes auctions isolation block (0.415541ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (0.500792ms)
+  ✔ audio decision prefers LiveKit but wired=false without credentials (0.075333ms)
+  ✔ money helper rounds currency (0.152333ms)
+  ✔ anti-sniping uses effective end (1.344334ms)
+✔ Auction V1 — unit (no PostgreSQL required) (4.841166ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (16.886125ms)
+  ✔ owner cannot bid — unauthorized (8.068917ms)
+  ✔ close race yields exactly one winner (20.597083ms)
+  ✔ host scheduling conflict detected (8.938833ms)
+  ✔ immutable event timeline appended (6.550709ms)
+  ✔ stale bid rejected when expectedVersion mismatches (6.505875ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (16.525333ms)
+  ✔ anti-sniping extends end when bid lands inside window (6.430583ms)
+  ✔ reserve price — unsold when top bid below reserve (6.670625ms)
+✔ Auction V1 — PostgreSQL integration (148.6955ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 213.977333
+
+▶ Realtime regression
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.300167ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.458209ms)
+  ✔ 100 sequenced events remain ordered (0.25175ms)
+  ✔ sanitized bidder label hides full user id (0.131334ms)
+✔ Auction Phase 3 — WS hub (unit) (2.649333ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (14.473833ms)
+  ✔ unknown auction subscribe denied (0.482458ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (40.088375ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (16.530708ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (13.456ms)
+  ✔ anti-sniping extension published as auction.extended (5.486083ms)
+  ✔ close race — exactly one winner after close (8.036542ms)
+  ✔ WS disconnect does not lose accepted DB bid (5.027ms)
+✔ Auction Phase 3 — publish after commit (PostgreSQL integration) (54.999834ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 149.515167
+
+▶ Host Phase 4
+▶ Auction Phase 4 — host domain (unit)
+  ✔ host lifecycle transitions (0.3225ms)
+  ✔ only active+verified hosts accept bookings (0.537375ms)
+  ✔ pre-audio contract is stub only (0.082875ms)
+✔ Auction Phase 4 — host domain (unit) (1.436333ms)
+▶ Auction Phase 4 — host E2E (PostgreSQL)
+  ✔ registration creates pending host (35.26025ms)
+  ✔ unverified host cannot accept booking requests (8.402959ms)
+  ✔ suspended host rejected for booking (6.4125ms)
+  ✔ availability overlap rejected (4.410625ms)
+  ✔ Path A E2E — seller auction → host request → host accept → scheduled (10.712541ms)
+  ✖ Path B — host proxy draft requires owner consent; admin schedules (2.128166ms)
+  ✖ host cannot become asset owner on Path B (1.370708ms)
+  ✖ concurrent booking requests — one wins for same slot (0.965125ms)
+  ✖ auction cannot schedule before admin review on host accept (1.067625ms)
+  ✖ audit timeline includes host booking events (0.949833ms)
+✖ Auction Phase 4 — host E2E (PostgreSQL) (98.192583ms)
+ℹ tests 13
+ℹ suites 2
+ℹ pass 8
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 150.77475
+
+✖ failing tests:
+
+test at auctions/host_phase4.test.js:239:3
+✖ Path B — host proxy draft requires owner consent; admin schedules (2.128166ms)
+  error: update or delete on table "host_bookings" violates foreign key constraint "auctions_host_booking_id_fkey" on table "auctions"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:55:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:242:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:241:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 335,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(54ce880b-5de7-42f3-a4f9-30891c179ebf) is still referenced from table "auctions".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auctions',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auctions_host_booking_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }
+
+test at auctions/host_phase4.test.js:275:3
+✖ host cannot become asset owner on Path B (1.370708ms)
+  error: update or delete on table "host_bookings" violates foreign key constraint "auctions_host_booking_id_fkey" on table "auctions"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:55:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:278:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:277:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 335,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(54ce880b-5de7-42f3-a4f9-30891c179ebf) is still referenced from table "auctions".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auctions',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auctions_host_booking_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }
+
+test at auctions/host_phase4.test.js:297:3
+✖ concurrent booking requests — one wins for same slot (0.965125ms)
+  error: update or delete on table "host_bookings" violates foreign key constraint "auctions_host_booking_id_fkey" on table "auctions"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:55:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:304:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:303:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 335,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(54ce880b-5de7-42f3-a4f9-30891c179ebf) is still referenced from table "auctions".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auctions',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auctions_host_booking_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }
+
+test at auctions/host_phase4.test.js:352:3
+✖ auction cannot schedule before admin review on host accept (1.067625ms)
+  error: update or delete on table "host_bookings" violates foreign key constraint "auctions_host_booking_id_fkey" on table "auctions"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:55:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:355:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:354:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 335,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(54ce880b-5de7-42f3-a4f9-30891c179ebf) is still referenced from table "auctions".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auctions',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auctions_host_booking_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }
+
+test at auctions/host_phase4.test.js:393:3
+✖ audit timeline includes host booking events (0.949833ms)
+  error: update or delete on table "host_bookings" violates foreign key constraint "auctions_host_booking_id_fkey" on table "auctions"
+      at /Users/fayez/Desktop/horse/backend/node_modules/pg/lib/client.js:694:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async wipe (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:55:5)
+      at async /Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:396:7
+      at async Object.withTransaction (/Users/fayez/Desktop/horse/backend/auctions/db.js:79:20)
+      at async TestContext.<anonymous> (/Users/fayez/Desktop/horse/backend/auctions/host_phase4.test.js:395:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    length: 335,
+    severity: 'ERROR',
+    code: '23503',
+    detail: 'Key (id)=(54ce880b-5de7-42f3-a4f9-30891c179ebf) is still referenced from table "auctions".',
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: 'public',
+    table: 'auctions',
+    column: undefined,
+    dataType: undefined,
+    constraint: 'auctions_host_booking_id_fkey',
+    file: 'ri_triggers.c',
+    line: '2553',
+    routine: 'ri_ReportViolation'
+  }

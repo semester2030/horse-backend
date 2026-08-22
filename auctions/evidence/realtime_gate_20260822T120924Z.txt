@@ -1,0 +1,63 @@
+=== NOMAS Auction Phase 3 Realtime Gate ===
+UTC: 2026-08-22T12:09:24Z
+AUCTIONS_TEST_DATABASE_URL: postgresql://localhost:5432/nomas_auctions_test
+
+▶ Core regression (Phase 1.1)
+▶ Auction V1 — unit (no PostgreSQL required)
+  ✔ lifecycle transitions follow frozen state machine (0.643708ms)
+  ✔ V1 species gate rejects equipment/sheep (0.296ms)
+  ✔ settlement note documents no financial completion in V1 (0.122041ms)
+  ✔ feature flag defaults OFF in backend config (0.104583ms)
+  ✔ Store Release isolation — app_config enableAuctions default false (0.13175ms)
+  ✔ health payload includes auctions isolation block (2.226958ms)
+  ✔ audio noop provider — failure does not throw (bidding continues pattern) (1.980208ms)
+  ✔ audio decision prefers LiveKit but wired=false without credentials (0.467667ms)
+  ✔ money helper rounds currency (0.158917ms)
+  ✔ anti-sniping uses effective end (2.280625ms)
+✔ Auction V1 — unit (no PostgreSQL required) (9.769291ms)
+▶ Auction V1 — PostgreSQL integration
+  ✔ atomic bid + idempotency + minimum increment (306.941417ms)
+  ✔ owner cannot bid — unauthorized (11.017792ms)
+  ✔ close race yields exactly one winner (25.452375ms)
+  ✔ host scheduling conflict detected (33.193875ms)
+  ✔ immutable event timeline appended (7.399625ms)
+  ✔ stale bid rejected when expectedVersion mismatches (6.472917ms)
+  ✔ concurrent same-amount bids — exactly one accepted, others rejected (40.481ms)
+  ✔ anti-sniping extends end when bid lands inside window (12.679625ms)
+  ✔ reserve price — unsold when top bid below reserve (10.664375ms)
+✔ Auction V1 — PostgreSQL integration (567.715542ms)
+ℹ tests 19
+ℹ suites 2
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 651.478042
+
+▶ Realtime gate (Phase 3)
+▶ Auction Phase 3 — WS hub (unit)
+  ✔ publishAuction assigns monotonic seq per auction room (1.50025ms)
+  ✔ replayAfter returns ascending seq without duplicates (0.808834ms)
+  ✔ 100 sequenced events remain ordered (0.290208ms)
+  ✔ sanitized bidder label hides full user id (0.074333ms)
+✔ Auction Phase 3 — WS hub (unit) (3.219041ms)
+▶ Auction Phase 3 — subscribe auth (PostgreSQL)
+  ✔ owner can subscribe to draft-like forbidden status only when owner (37.668542ms)
+  ✔ unknown auction subscribe denied (0.472042ms)
+✔ Auction Phase 3 — subscribe auth (PostgreSQL) (66.679375ms)
+▶ Auction Phase 3 — publish after commit (PostgreSQL integration)
+  ✔ bid commit publishes bid.accepted with sanitized bidder label (16.845292ms)
+  ✔ concurrent bids — DB truth + single winner per amount race (19.577958ms)
+  ✔ anti-sniping extension published as auction.extended (11.499334ms)
+  ✔ close race — exactly one winner after close (13.419625ms)
+  ✔ WS disconnect does not lose accepted DB bid (7.585292ms)
+✔ Auction Phase 3 — publish after commit (PostgreSQL integration) (75.81875ms)
+ℹ tests 11
+ℹ suites 3
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 208.342

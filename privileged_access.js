@@ -1,13 +1,9 @@
 /**
  * أرقام المطوّر/الأدمن ذات الصلاحيات الكاملة.
- * لا تحتاج موافقة تحقق تاجر، ويمكنها نشر أي خدمة/منتج/خبير.
- *
- * PRIVILEGED_PHONES=+966500756705,0500756705
- * (إن لم تُضبط، يُستخدم الرقم الافتراضي للمطوّر)
+ * تُضبط فقط عبر البيئة: PRIVILEGED_PHONES=+9665...,0500...
+ * لا توجد قائمة افتراضية في الإنتاج أو التطوير.
  */
 const countries = require('./countries');
-
-const DEFAULT_PRIVILEGED_PHONES = ['+966500756705', '0500756705', '500756705'];
 
 /** يحوّل الأرقام العربية/الفارسية إلى لاتينية قبل التطبيع */
 function toAsciiDigits(raw) {
@@ -18,10 +14,11 @@ function toAsciiDigits(raw) {
 
 function parsePhoneList() {
   const raw = String(process.env.PRIVILEGED_PHONES || '').trim();
-  const entries = raw
-    ? raw.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean)
-    : DEFAULT_PRIVILEGED_PHONES;
-  return entries;
+  if (!raw) return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function privilegedPhoneSet() {
@@ -58,7 +55,6 @@ function elevatePrivilegedUser(user) {
   user.verificationStatus = 'approved';
   user.verificationNote = user.verificationNote || 'حساب مطوّر — صلاحيات كاملة';
   user.isPrivileged = true;
-  // كل الفصائل دائماً — حتى لو كان الحساب معلناً لخيل/إبل/صقور فقط
   user.allowedSpecies = ['horse', 'camel', 'falcon', 'sheep', 'all'];
   user.advertiserSpecies = ['horse', 'camel', 'falcon', 'sheep'];
   return user;

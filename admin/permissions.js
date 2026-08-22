@@ -40,6 +40,10 @@ const ALL_PERMISSIONS = [
   'team:write',
   'metrics:read',
   'settings:read',
+  'auctions:read',
+  'auctions:moderate',
+  'auctions:ops',
+  'auctions:disputes',
 ];
 
 const ROLE_PERMISSIONS = {
@@ -55,6 +59,10 @@ const ROLE_PERMISSIONS = {
     'videos:moderate',
     'audit:read',
     'analytics:read',
+    'auctions:read',
+    'auctions:moderate',
+    'auctions:ops',
+    'auctions:disputes',
   ],
   [ADMIN_ROLES.verifier]: [
     'dashboard:read',
