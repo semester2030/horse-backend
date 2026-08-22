@@ -116,7 +116,7 @@ function isProductionEnv() {
   return String(process.env.NODE_ENV || '').toLowerCase() === 'production';
 }
 
-/** No hardcoded secret fallbacks. Production refuses to boot without secrets. */
+/** No hardcoded secret fallbacks. Production refuses to boot without admin secrets. */
 function resolveRequiredSecret(name, { allowAdminSecretAlias = false } = {}) {
   const direct = String(process.env[name] || '').trim();
   if (direct) return direct;
@@ -131,10 +131,23 @@ function resolveRequiredSecret(name, { allowAdminSecretAlias = false } = {}) {
   return '';
 }
 
-const ADMIN_SECRET = resolveRequiredSecret('ADMIN_SECRET');
-const ADMIN_JWT_SECRET = resolveRequiredSecret('ADMIN_JWT_SECRET', {
-  allowAdminSecretAlias: true,
-});
+/** Accept ADMIN_SECRET or ADMIN_JWT_SECRET — Render may have only one configured. */
+function resolveAdminSecrets() {
+  const secretEnv = String(process.env.ADMIN_SECRET || '').trim();
+  const jwtEnv = String(process.env.ADMIN_JWT_SECRET || '').trim();
+  const adminSecret = secretEnv || jwtEnv;
+  const adminJwtSecret = jwtEnv || secretEnv;
+  if (isProductionEnv() && !adminSecret) {
+    console.error(
+      '[FATAL] Missing required secret: set ADMIN_SECRET or ADMIN_JWT_SECRET in Render Environment',
+    );
+    process.exit(1);
+  }
+  return { adminSecret, adminJwtSecret };
+}
+
+const { adminSecret: ADMIN_SECRET, adminJwtSecret: ADMIN_JWT_SECRET } =
+  resolveAdminSecrets();
 
 if (isProductionEnv()) {
   const expose = String(process.env.OTP_EXPOSE_CODE || 'false').toLowerCase();
