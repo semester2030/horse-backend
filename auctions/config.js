@@ -55,6 +55,12 @@ function getAuctionDeveloperUserId() {
   return String(process.env.AUCTION_DEVELOPER_USER_ID || '').trim();
 }
 
+/** Server-side scheduled→live / live→close poll interval (ms). Min 1000. */
+function getLifecycleIntervalMs() {
+  const n = Number(process.env.AUCTION_LIFECYCLE_INTERVAL_MS || 5000);
+  return Number.isFinite(n) && n >= 1000 ? n : 5000;
+}
+
 module.exports = {
   get ENABLE_AUCTIONS() {
     return isAuctionsEnabled();
@@ -73,5 +79,6 @@ module.exports = {
   HOST_STATUSES,
   AUDIO_PROVIDER,
   getAuctionDeveloperUserId,
+  getLifecycleIntervalMs,
   envBool,
 };

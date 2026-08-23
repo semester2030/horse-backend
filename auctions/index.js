@@ -10,6 +10,12 @@ const {
   registerAuctionAdminRoutes,
 } = require('./routes');
 const { DECISION: audioDecision } = require('./audio/compare');
+const {
+  startAuctionLifecycleWorker,
+  runLifecycleTick,
+} = require('./services/lifecycle_worker');
+
+let lifecycleWorker = null;
 
 async function initAuctionsModule() {
   if (!ENABLE_AUCTIONS) {
@@ -34,6 +40,20 @@ async function initAuctionsModule() {
   };
 }
 
+function startAuctionsLifecycle({ auctionRealtime } = {}) {
+  if (lifecycleWorker) return lifecycleWorker;
+  if (!ENABLE_AUCTIONS || !isDbConfigured()) return null;
+  lifecycleWorker = startAuctionLifecycleWorker({ auctionRealtime });
+  return lifecycleWorker;
+}
+
+function stopAuctionsLifecycle() {
+  if (lifecycleWorker) {
+    lifecycleWorker.stop();
+    lifecycleWorker = null;
+  }
+}
+
 function registerAuctions(app, ctx) {
   registerAuctionRoutes(app, ctx);
 }
@@ -51,6 +71,9 @@ module.exports = {
   initAuctionsModule,
   registerAuctions,
   extendAdminForAuctions,
+  startAuctionsLifecycle,
+  stopAuctionsLifecycle,
+  runLifecycleTick,
   ENABLE_AUCTIONS,
   AUCTIONS_DATABASE_URL,
   isDbConfigured,

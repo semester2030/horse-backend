@@ -58,6 +58,7 @@ const opsNotify = require('./ops_notify');
 const {
   initAuctionsModule,
   registerAuctions,
+  startAuctionsLifecycle,
   ENABLE_AUCTIONS,
   isDbConfigured: isAuctionsDbConfigured,
 } = require('./auctions');
@@ -3848,6 +3849,7 @@ server.listen(PORT, HOST, async () => {
       console.log(`[auctions] enabled=${auctionsBoot.enabled} ready=${auctionsBoot.ready}`);
       if (auctionsBoot.ready) {
         await startAuctionWsCrossInstance();
+        startAuctionsLifecycle({ auctionRealtime });
       }
     }
   } catch (e) {
