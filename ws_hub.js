@@ -209,12 +209,54 @@ function createWsHub(options = {}) {
     rooms.get(r).add(client);
   }
 
+  /** Unique authenticated userIds in room (multi-device = 1). Ephemeral only. */
+  function roomUniqueUserCount(room) {
+    const set = rooms.get(String(room));
+    if (!set || set.size === 0) return 0;
+    const ids = new Set();
+    for (const c of set) {
+      if (c?.userId) ids.add(String(c.userId));
+    }
+    return ids.size;
+  }
+
+  function auctionLiveViewers(auctionId) {
+    if (!auctionId) return 0;
+    return roomUniqueUserCount(`auction:${auctionId}`);
+  }
+
+  /**
+   * Ephemeral liveViewers fan-out — NOT sequenced (no replay/SoT).
+   * Multi-device same userId counts as 1.
+   */
+  function publishAuctionPresence(auctionId, liveViewersOverride) {
+    if (!auctionId) return null;
+    const room = `auction:${auctionId}`;
+    const liveViewers =
+      liveViewersOverride != null
+        ? Number(liveViewersOverride) || 0
+        : auctionLiveViewers(auctionId);
+    const event = {
+      type: 'auction.presence',
+      auctionId: String(auctionId),
+      liveViewers,
+      presenceAvailable: true,
+      serverTimestamp: new Date().toISOString(),
+    };
+    publish(room, event);
+    return event;
+  }
+
   function leaveAll(client) {
     if (client._heartbeatTimer) {
       clearInterval(client._heartbeatTimer);
       client._heartbeatTimer = null;
     }
+    const auctionIds = [];
     for (const r of client.rooms) {
+      if (String(r).startsWith('auction:')) {
+        auctionIds.push(String(r).slice('auction:'.length));
+      }
       const set = rooms.get(r);
       if (set) {
         set.delete(client);
@@ -223,6 +265,9 @@ function createWsHub(options = {}) {
     }
     client.rooms.clear();
     clients.delete(client);
+    for (const id of auctionIds) {
+      publishAuctionPresence(id);
+    }
   }
 
   function safeSend(client, payload) {
@@ -346,6 +391,11 @@ function createWsHub(options = {}) {
       }
       if (Number.isFinite(floor) && floor >= 0) {
         replayToClient(client, room, floor);
+      }
+      // Presence after join — reconnect does not create a qualified view.
+      if (String(room).startsWith('auction:')) {
+        const auctionId = String(room).slice('auction:'.length);
+        publishAuctionPresence(auctionId);
       }
     };
     void run();
@@ -562,11 +612,14 @@ function createWsHub(options = {}) {
     publishNegotiation,
     publishAuction,
     publishAuctionAsync,
+    publishAuctionPresence,
     setAuctionCrossInstance,
     replayAfter: sequencer.replayAfter,
     currentSeq: sequencer.currentSeq,
     safeSend,
     clientCount: () => clients.size,
+    roomUniqueUserCount,
+    auctionLiveViewers,
     _sequencer: sequencer,
     _rooms: rooms,
     _joinRoom: joinRoom,

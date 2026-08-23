@@ -75,6 +75,11 @@ function createAdminRouter(ctx) {
 
   // ——— Auth ———
   router.post('/auth/login', (req, res) => {
+    if (!ctx.adminJwtSecret) {
+      return res.status(503).json({
+        message: 'لوحة الإدارة غير مفعّلة — اضبط ADMIN_JWT_SECRET على الخادم',
+      });
+    }
     const email = String(req.body?.email || '').toLowerCase().trim();
     const password = String(req.body?.password || '');
     const admin = [...ctx.store.adminUsers.values()].find(

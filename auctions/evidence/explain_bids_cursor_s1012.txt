@@ -1,0 +1,8 @@
+indexes:
+idx_bids_auction_amount
+bids_auction_created_id_idx
+
+plan (enable_seqscan=off):
+Limit  (cost=0.12..8.14 rows=1 width=110)
+  ->  Index Scan using bids_auction_created_id_idx on bids  (cost=0.12..8.14 rows=1 width=110)
+        Index Cond: (auction_id = '8efa362e-dd7b-470d-aeb5-1662ba62c6b7'::uuid)

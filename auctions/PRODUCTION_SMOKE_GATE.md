@@ -1,7 +1,29 @@
 # PR-07–10 — Production Smoke Final Gate
 
 **Mode:** MANUAL / ASSISTED VALIDATION ONLY  
-**No product changes · No deploy · No automatic `ENABLE_AUCTIONS=true`**
+**No product changes · Deploy gated on Render env + successful revision**
+
+## Render deploy checklist (horse-backend)
+
+| Variable | Required for boot | Required for auctions PUBLIC LIVE |
+|----------|-------------------|-----------------------------------|
+| `ADMIN_JWT_SECRET` or `ADMIN_SECRET` | Recommended (admin `/console/`) | Yes (ops + auction admin) |
+| `ENABLE_AUCTIONS` | No | `true` |
+| `AUCTIONS_DATABASE_URL` | No | Yes (Render Postgres internal URL) |
+| `AUCTION_DEVELOPER_USER_ID` | No | Recommended |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | No | Yes for host audio |
+| `AUCTION_AUDIO_PROVIDER` | No | `livekit` when LiveKit configured |
+
+**2026-08-22 deploy failure (`d5dd78a`, `dep-da50mrjl550s73fuq060`):** build OK, runtime exit — missing `ADMIN_SECRET` / `ADMIN_JWT_SECRET`. Fix: set secrets in Render Dashboard → Environment → Save & deploy, or deploy commit that warns instead of fatal boot (admin disabled until secrets set).
+
+After env + deploy: live revision must be ≥ auction activation commit; probes:
+
+```bash
+curl -sS https://horse-backend-i68h.onrender.com/health
+curl -sS https://horse-backend-i68h.onrender.com/auctions/status
+```
+
+Expect `/auctions/status` **200** with `enabled: true` and `dbConfigured: true` when PUBLIC LIVE.
 
 ## Prerequisites (automated — closed)
 

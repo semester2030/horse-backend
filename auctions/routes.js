@@ -110,6 +110,10 @@ function registerAuctionRoutes(app, ctx) {
   });
 
   const queryService = require('./services/auction_query_service');
+  const {
+    requireListingLocationSnapshot,
+  } = require('./services/location_snapshot');
+  const { recordQualifiedView, getBidAggregates, getExtensionsCount } = require('./services/metrics_service');
 
   router.get('/', async (req, res) => {
     try {
@@ -139,16 +143,24 @@ function registerAuctionRoutes(app, ctx) {
     try {
       const { getPool } = require('./db');
       const pool = getPool();
-      let auction = await queryService.getAuctionById(pool, req.params.id);
+      let auction = await queryService.getAuctionById(pool, req.params.id, {
+        wsHub: ctx.wsHub,
+      });
       if (!auction) {
         return res.status(404).json({ message: 'Auction not found', code: 'AUCTION_NOT_FOUND' });
       }
       if (ctx.store) {
         auction = queryService.enrichVideoFromStore(auction, ctx.store);
       }
-      const bids = await queryService.listBids(pool, req.params.id, { limit: 20 });
+      const page = await queryService.listBids(pool, req.params.id, { limit: 20 });
       const host = await queryService.getHostBookingForAuction(pool, req.params.id);
-      res.json({ auction, bids, host, serverTime: new Date().toISOString() });
+      res.json({
+        auction,
+        bids: page.bids,
+        bidsNextCursor: page.nextCursor,
+        host,
+        serverTime: new Date().toISOString(),
+      });
     } catch (err) {
       res.status(500).json({ message: err.message, code: 'AUCTION_GET_ERROR' });
     }
@@ -157,12 +169,53 @@ function registerAuctionRoutes(app, ctx) {
   router.get('/:id/bids', async (req, res) => {
     try {
       const { getPool } = require('./db');
-      const bids = await queryService.listBids(getPool(), req.params.id, {
+      const page = await queryService.listBids(getPool(), req.params.id, {
         limit: req.query.limit,
+        cursor: req.query.cursor,
+        includeBidderId: false,
       });
-      res.json({ bids });
+      res.json({
+        bids: page.bids,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+      });
     } catch (err) {
       res.status(500).json({ message: err.message });
+    }
+  });
+
+  router.post('/:id/views', auth, requireSessionUser, async (req, res) => {
+    try {
+      const { getPool } = require('./db');
+      const pool = getPool();
+      const auction = await queryService.getAuctionById(pool, req.params.id, {
+        wsHub: ctx.wsHub,
+      });
+      if (!auction) {
+        return res.status(404).json({ message: 'Auction not found', code: 'AUCTION_NOT_FOUND' });
+      }
+      const result = await recordQualifiedView(pool, {
+        auctionId: req.params.id,
+        viewerKey: String(req.authUserId),
+      });
+      const { loadAuctionMetrics } = require('./services/metrics_service');
+      const fresh = await loadAuctionMetrics(pool, req.params.id);
+      res.json({
+        view: result,
+        metrics: {
+          viewCount: fresh.viewCount,
+          uniqueViewers: fresh.uniqueViewers,
+          liveViewers: auction.liveViewers,
+          uniqueBidders: fresh.uniqueBidders,
+          bidCount: fresh.bidCount,
+          inserted: result.inserted,
+        },
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({
+        message: err.message,
+        code: err.code || 'AUCTION_VIEW_ERROR',
+      });
     }
   });
 
@@ -215,6 +268,16 @@ function registerAuctionRoutes(app, ctx) {
         });
       }
 
+      // Authoritative location from listing — ignore any client lat/lng/location body.
+      const listing = ctx.store.horses.get(String(body.listingId));
+      const locResult = requireListingLocationSnapshot(listing);
+      if (!locResult.ok) {
+        return res.status(locResult.status).json({
+          message: locResult.message,
+          code: locResult.code,
+        });
+      }
+
       const requiresHost = body.requiresHost === true;
 
       const auction = await withTransaction(async (client) => {
@@ -244,6 +307,7 @@ function registerAuctionRoutes(app, ctx) {
           endAt: body.endAt,
           antiSnipingSeconds: body.antiSnipingSeconds,
           requiresHost,
+          locationSnapshot: locResult.snapshot,
         });
       });
       res.status(201).json({ auction });
@@ -368,8 +432,18 @@ function registerAuctionRoutes(app, ctx) {
         }),
       );
       if (auctionRealtime && result.auction && !result.replay) {
+        let metrics = {};
+        try {
+          const pool = getPool();
+          const bids = await getBidAggregates(pool, result.auction.id);
+          const extensionsCount = await getExtensionsCount(pool, result.auction.id);
+          metrics = { ...bids, extensionsCount };
+        } catch (_) {
+          /* delivery still includes price/endAt from auction row */
+        }
         auctionRealtime.publishBidAccepted(result.auction, result.bid, {
           wasExtended: result.wasExtended,
+          metrics,
         });
       }
       res.status(result.replay ? 200 : 201).json(result);
@@ -774,7 +848,9 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     requirePerm('auctions:read'),
     async (req, res) => {
       try {
-        const auction = await getAdminAuctionDetail(getPool(), req.params.id);
+        const auction = await getAdminAuctionDetail(getPool(), req.params.id, {
+          wsHub: ctx.wsHub,
+        });
         if (!auction) return res.status(404).json({ message: 'Not found' });
         res.json({ auction });
       } catch (err) {
@@ -789,7 +865,9 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     requirePerm('auctions:read'),
     async (req, res) => {
       try {
-        const auction = await getAdminAuctionDetail(getPool(), req.params.id);
+        const auction = await getAdminAuctionDetail(getPool(), req.params.id, {
+          wsHub: ctx.wsHub,
+        });
         if (!auction) return res.status(404).json({ message: 'Not found' });
         res.json({ timeline: auction.timeline });
       } catch (err) {

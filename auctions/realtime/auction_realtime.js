@@ -22,13 +22,20 @@ function auctionSnapshotPayload(auction, now = new Date()) {
     end_at: auction.endAt || auction.end_at,
     extended_until: auction.extendedUntil || auction.extended_until,
   };
+  const currentPrice = Number(auction.currentPrice ?? auction.current_price);
+  const minimumIncrement = Number(
+    auction.minimumIncrement ?? auction.minimum_increment ?? 0,
+  );
+  const nextMinimumBid = currentPrice + minimumIncrement;
   return {
     auctionId: auction.id,
     serverTimestamp: now.toISOString(),
     version: Number(auction.version),
-    currentPrice: Number(auction.currentPrice ?? auction.current_price),
+    currentPrice,
     state: auction.status,
     effectiveEndAt: effectiveEndAt(rowLike, now).toISOString(),
+    nextMinimumBid,
+    nextValidBid: nextMinimumBid,
   };
 }
 
@@ -64,22 +71,51 @@ function createAuctionRealtime({ wsHub, getPool }) {
     return VIEWABLE_STATUSES.has(status);
   }
 
-  function publishBidAccepted(auction, bid, { wasExtended = false } = {}) {
+  /**
+   * Post-COMMIT delivery only. Optional metrics must come from PostgreSQL
+   * aggregates — never invent client-side financial counters.
+   */
+  function publishBidAccepted(
+    auction,
+    bid,
+    { wasExtended = false, metrics = {} } = {},
+  ) {
     const out = [];
+    const metricExtra = {};
+    if (metrics.bidCount != null) metricExtra.bidCount = Number(metrics.bidCount);
+    if (metrics.uniqueBidders != null) {
+      metricExtra.uniqueBidders = Number(metrics.uniqueBidders);
+    }
+    if (metrics.extensionsCount != null) {
+      metricExtra.extensionsCount = Number(metrics.extensionsCount);
+    }
     out.push(
       publish('bid.accepted', auction, {
+        bidId: bid.id || bid.bidId || null,
         bidAmount: Number(bid.amount),
         bidderLabel: sanitizeBidderLabel(bid.bidderUserId || bid.bidder_user_id),
+        ...metricExtra,
       }),
     );
     if (wasExtended || auction.status === 'extended') {
       out.push(
         publish('auction.extended', auction, {
           antiSniping: true,
+          ...(metricExtra.extensionsCount != null
+            ? { extensionsCount: metricExtra.extensionsCount }
+            : {}),
         }),
       );
     }
     return out.filter(Boolean);
+  }
+
+  /** Ephemeral presence — not sequenced, not financial SoT. */
+  function publishPresence(auctionId, liveViewers) {
+    if (!wsHub || typeof wsHub.publishAuctionPresence !== 'function') {
+      return null;
+    }
+    return wsHub.publishAuctionPresence(auctionId, liveViewers);
   }
 
   function publishTransition(beforeStatus, auction, { reason } = {}) {
@@ -118,6 +154,7 @@ function createAuctionRealtime({ wsHub, getPool }) {
     canSubscribe,
     publish,
     publishBidAccepted,
+    publishPresence,
     publishTransition,
     publishClosed,
     sanitizeBidderLabel,

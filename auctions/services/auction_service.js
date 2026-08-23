@@ -21,6 +21,7 @@ function money(n) {
 
 function mapAuctionRow(row) {
   if (!row) return null;
+  const { mapPublicLocation } = require('./location_snapshot');
   return {
     id: row.id,
     lotId: row.lot_id,
@@ -49,6 +50,9 @@ function mapAuctionRow(row) {
     frozenReason: row.frozen_reason,
     frozenAt: row.frozen_at,
     frozenByAdminId: row.frozen_by_admin_id,
+    peakLiveViewers:
+      row.peak_live_viewers != null ? Number(row.peak_live_viewers) : 0,
+    location: mapPublicLocation(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -119,12 +123,18 @@ async function createAuctionDraft(client, input) {
     throw err;
   }
 
+  const loc = input.locationSnapshot || null;
   const { rows } = await client.query(
     `INSERT INTO auctions (
       lot_id, owner_user_id, created_by_user_id, created_by_role, owner_consent_ref,
       species, status, starting_price, minimum_increment, reserve_price, current_price,
-      start_at, end_at, anti_sniping_seconds, settlement_note
-    ) VALUES ($1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$7,$10,$11,$12,$13)
+      start_at, end_at, anti_sniping_seconds, settlement_note,
+      location_city, location_district, location_address,
+      location_lat, location_lng, location_source_listing_id, location_captured_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$7,$10,$11,$12,$13,
+      $14,$15,$16,$17,$18,$19,$20
+    )
     RETURNING *`,
     [
       lot.id,
@@ -140,6 +150,13 @@ async function createAuctionDraft(client, input) {
       endAt.toISOString(),
       input.antiSnipingSeconds ?? ANTI_SNIPE_SECONDS,
       SETTLEMENT_NOTE,
+      loc?.city || null,
+      loc?.district || null,
+      loc?.address || null,
+      loc?.lat != null ? Number(loc.lat) : null,
+      loc?.lng != null ? Number(loc.lng) : null,
+      loc?.sourceListingId || null,
+      loc?.capturedAt || null,
     ],
   );
 
