@@ -855,13 +855,9 @@ app.post('/auth/otp/send', async (req, res) => {
   if (!rate.ok) {
     return res.status(rate.status).json({ message: rate.message, code: rate.code });
   }
-  if (isProductionEnv() && otpDev.codeForPhone(phone)) {
-    return res.status(403).json({
-      message: 'تجاوز المطوّر غير مسموح في الإنتاج',
-      code: 'OTP_DEV_DISABLED_IN_PRODUCTION',
-    });
-  }
-  const devBypassCode = otpDev.codeForPhone(phone);
+  // Production: never use fixed OTP bypass — send real SMS (same as any user).
+  // Dev/staging only: OTP_DEV_PHONES skips Taqnyat with a fixed code.
+  const devBypassCode = isProductionEnv() ? null : otpDev.codeForPhone(phone);
   const code = devBypassCode || otpSixDigits();
   otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL_MS });
 
