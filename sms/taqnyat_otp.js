@@ -47,7 +47,8 @@ function mapTaqnyatError(status, data, raw) {
     return 'مفتاح Taqnyat غير صحيح — تحقق من TAQNYAT_BEARER_TOKEN على Render';
   }
   if (status === 400 && (text.includes('sender') || text.includes('مرسل'))) {
-    return 'اسم المرسل غير مفعّل — فعّل NOMAS في portal.taqnyat.sa (أسماء المرسل)';
+    const sender = senderName() || '(غير محدد)';
+    return `اسم المرسل غير مفعّل في Taqnyat: «${sender}» — فعّله في portal.taqnyat.sa (أسماء المرسل) أو ضع الاسم المفعّل حرفياً في TAQNYAT_SENDER على Render`;
   }
   if (status === 403 || text.includes('forbidden') || text.includes('balance')) {
     if (text.includes('ip') && text.includes('not authorized')) {
