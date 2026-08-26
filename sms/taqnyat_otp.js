@@ -80,8 +80,9 @@ async function sendOtpSms(e164Phone, code) {
   }
 
   const recipient = toTaqnyatRecipient(e164Phone);
-  // لا تذكر اسم المنتج/العلامة في النص — اسم المرسل من Taqnyat فقط (مثل ceet cente).
-  const body = `رمز التحقق: ${code}\nصالح 5 دقائق.`;
+  const sender = senderName();
+  // اسم الجهة في النص = نفس TAQNYAT_SENDER على Render (حالياً: ceet center) — بدون نوماس.
+  const body = `رمز التحقق في ${sender}: ${code}\nصالح 5 دقائق.`;
 
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -93,7 +94,7 @@ async function sendOtpSms(e164Phone, code) {
     body: JSON.stringify({
       recipients: [recipient],
       body,
-      sender: senderName(),
+      sender,
     }),
   });
 

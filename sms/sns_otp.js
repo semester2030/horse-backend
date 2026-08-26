@@ -52,9 +52,11 @@ async function sendOtpSms(e164Phone, code) {
     },
   });
 
-  // إنجليزي فقط — أوضح للمشغّلين السعوديين وأقل مشاكل ترميز من العربي.
-  // No brand name in body — Sender ID comes from AWS_SNS_SENDER_ID only.
-  const message = `Verification code: ${code}. Valid 5 minutes.`;
+  const senderId = (process.env.AWS_SNS_SENDER_ID || '').trim();
+  // Prefer Sender ID in body when set; never hardcode a product brand.
+  const message = senderId
+    ? `${senderId} verification code: ${code}. Valid 5 minutes.`
+    : `Verification code: ${code}. Valid 5 minutes.`;
 
   /** @type {import('@aws-sdk/client-sns').PublishCommandInput} */
   const input = {
@@ -68,7 +70,6 @@ async function sendOtpSms(e164Phone, code) {
     },
   };
 
-  const senderId = (process.env.AWS_SNS_SENDER_ID || '').trim();
   if (senderId) {
     input.MessageAttributes['AWS.SNS.SMS.SenderID'] = {
       DataType: 'String',
