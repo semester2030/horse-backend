@@ -80,7 +80,8 @@ async function sendOtpSms(e164Phone, code) {
   }
 
   const recipient = toTaqnyatRecipient(e164Phone);
-  const body = `رمز التحقق في نوماس: ${code}\nصالح 5 دقائق.`;
+  // لا تذكر اسم المنتج/العلامة في النص — اسم المرسل من Taqnyat فقط (مثل ceet cente).
+  const body = `رمز التحقق: ${code}\nصالح 5 دقائق.`;
 
   const res = await fetch(API_URL, {
     method: 'POST',

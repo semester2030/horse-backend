@@ -53,7 +53,8 @@ async function sendOtpSms(e164Phone, code) {
   });
 
   // إنجليزي فقط — أوضح للمشغّلين السعوديين وأقل مشاكل ترميز من العربي.
-  const message = `Nomas verification code: ${code}. Valid 5 minutes.`;
+  // No brand name in body — Sender ID comes from AWS_SNS_SENDER_ID only.
+  const message = `Verification code: ${code}. Valid 5 minutes.`;
 
   /** @type {import('@aws-sdk/client-sns').PublishCommandInput} */
   const input = {
