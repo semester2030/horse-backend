@@ -1,0 +1,87 @@
+# VIDEO OWNER MANAGEMENT — FINAL P1 CLOSURE EVIDENCE
+# Date: 2026-08-28
+# Scope: NORMAL HARAJ VIDEO OWNER MANAGEMENT only
+# Deploy: NO
+# Store: NO
+# Auction: NO
+
+## 1. Cleanup Architecture
+- Module: backend/video_media_cleanup.js
+- Worker: started from backend/index.js (VIDEO_MEDIA_CLEANUP_INTERVAL_MS, default 60s)
+- Credentials: server-side Cloudflare account/token only
+- Delete only UIDs on that video's pendingCleanupCloudflareVideoIds queue
+- Never deletes live canonical UID unless soft-deleted (mediaCleanupAllowCurrentUid)
+- Failure leaves UID on queue; canonical media untouched
+- CF 404 / already-gone = idempotent success
+
+## 2. Cleanup Durability
+- YES: single-field pendingCleanupCloudflareVideoId WAS insufficient (Replacement B could drop A)
+- FIX: pendingCleanupCloudflareVideoIds[] append-only queue
+- Legacy single field migrated into array on read/switch
+- Proven: repeated A→B→C keeps A and B on queue (tests 13b + video_media_cleanup)
+
+## 3. Repeated Replacement Proof
+- Backend HTTP 13b: PASS
+- Cleanup unit: repeated replacement keeps both old UIDs: PASS
+- Flutter workflow A→B→C identity/stats: PASS
+
+## 4. Flutter Replacement Workflow Proof
+- VideoReplaceWorkflow injectable (no real Cloudflare)
+- Phases: uploading → awaitingReady → switching → succeeded
+- Owner menu exposes "تغيير الفيديو"
+- Feed in-place list update same id/index (player ValueKey on URL)
+
+## 5. Failure Preservation Proof
+- Upload failure → OLD canonical
+- Missing HLS / not ready → OLD; replace API not called
+- Replace API null → OLD + error contains "بقي الفيديو القديم"
+
+## 6. Player Transition Proof
+- Same video entity id, price, location, social counters
+- New media URL only (ValueKey('${url}-$index') forces single player rebuild)
+- No second feed item; list length unchanged
+
+## 7. Delete / Cleanup Behavior
+- Soft delete: hidden + status=removed
+- Soft delete enqueues current Stream UID for async cleanup
+- Physical CF delete is async via same worker (not synchronous on DELETE)
+- Non-owner DELETE → 403; anonymous → 401 (ownership HTTP suite)
+
+## 8. Security Regression
+- Covered by video_ownership.test.js HTTP cases 1–15 + 13b
+- Legacy missing userId → 403 fail-closed (KEEP)
+- Media fields forbidden on generic PATCH
+- replace-media owner only
+
+## 9. Feed UX Regression
+- video_feed_listing_overlay_test.dart: distance-only 📍 X.X كم
+- No counters, dots, Auction CTA, city/coords/loading
+
+## 10. Backend Test Results
+- video_media_cleanup.test.js + video_ownership.test.js
+- Exact: 29 pass / 0 fail
+
+## 11. Flutter Test Results
+- video_replace_workflow_test + video_owner_menu_test + video_feed_listing_overlay_test
+- Exact: 32 pass / 0 fail
+
+## 12. Analyzer / Static Checks
+- flutter analyze (touched video files): No issues found
+- node --check video_media_cleanup.js / video_ownership.js: OK
+
+## 13. Remaining Classification
+A. Cloudflare cleanup: CLOSED
+B. Replacement workflow coverage: CLOSED
+C. Legacy missing userId: ACCEPTED SECURE LIMITATION
+D. Service Video full editor: SEPARATE PRODUCT ENHANCEMENT
+E. Multi-image gallery images[]: SEPARATE PRODUCT ENHANCEMENT (not in /videos contract)
+
+## 14. Remaining P0
+NONE for NORMAL HARAJ VIDEO OWNER MANAGEMENT
+
+## 15. Remaining P1
+NONE that block A for this surface
+(Service editor / images[] are product enhancements, not P1 for this track)
+
+## 16. Final Verdict
+A — NORMAL HARAJ VIDEO OWNER MANAGEMENT FULLY CLOSED

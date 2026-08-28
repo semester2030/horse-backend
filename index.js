@@ -163,6 +163,8 @@ if (isProductionEnv()) {
 const { createAdminRouter, registerAppVerificationRoutes } = require('./admin/routes');
 const { seedSuperAdmin } = require('./admin/auth');
 const heritageTB = require('./heritage_tags_badges');
+const videoOwnership = require('./video_ownership');
+const videoMediaCleanup = require('./video_media_cleanup');
 const { createExpertsApi } = require('./experts');
 const otpRateLimit = require('./otp_rate_limit');
 
@@ -780,7 +782,10 @@ function filterListingsForViewer(list, viewer) {
 }
 
 function filterVideosForViewer(list, viewer) {
-  let out = list.filter((v) => !v.hidden && v.status !== 'removed');
+  const viewerUserId = viewer ? String(viewer.id || '') : '';
+  let out = list.filter((v) =>
+    videoOwnership.includeVideoForViewer(v, viewerUserId || null),
+  );
   if (!viewer) return out;
   return out.filter((v) => {
     const ownerId = v.userId || v.ownerId;
@@ -2899,6 +2904,11 @@ function enrichVideoDistance(video, clientLat, clientLng) {
 
 // GET /videos بدون auth — تصفح الزائر قبل التسجيل
 app.get('/videos', (req, res) => {
+  // Optional session: enables owner-visible unpublished (hidden) items.
+  const h = req.headers.authorization;
+  const t = h && h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (t) req.token = t;
+
   const { type, q, sort, serviceCategory, targetSpecies, subCategory, tag, badge } = req.query;
   let list = [...store.videos.values()];
   if (type) list = list.filter((v) => v.type === type);
@@ -3060,7 +3070,7 @@ app.get('/videos', (req, res) => {
   });
 
   const sortKey = sort != null ? String(sort) : 'newest';
-  const t = (x) => {
+  const createdTs = (x) => {
     const d = x.createdAt ? new Date(x.createdAt).getTime() : 0;
     return Number.isFinite(d) ? d : 0;
   };
@@ -3068,19 +3078,19 @@ app.get('/videos', (req, res) => {
     list.sort((a, b) => {
       const da = a.distanceKm;
       const db = b.distanceKm;
-      if (da == null && db == null) return t(b) - t(a);
+      if (da == null && db == null) return createdTs(b) - createdTs(a);
       if (da == null) return 1;
       if (db == null) return -1;
       return da - db;
     });
   } else if (sortKey === 'oldest') {
-    list.sort((a, b) => t(a) - t(b));
+    list.sort((a, b) => createdTs(a) - createdTs(b));
   } else if (sortKey === 'views_desc') {
     list.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
   } else if (sortKey === 'likes_desc') {
     list.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
   } else {
-    list.sort((a, b) => t(b) - t(a));
+    list.sort((a, b) => createdTs(b) - createdTs(a));
   }
 
   list = filterVideosForViewer(list, viewerFromToken(req));
@@ -3126,11 +3136,16 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
     if (isSheepSpecies(ts) && rejectSheepPaused(res)) return;
   }
 
-  const body = heritageTB.applyClientListingFields(req.body || {}, {});
+  const body = heritageTB.applyClientListingFields(
+    videoOwnership.stripClientOwnershipFields(req.body || {}),
+    {},
+  );
   const tagSpecies = heritageTypes.includes(bodyType)
     ? bodyType
     : String(req.body?.targetSpecies || 'horse');
   const videoId = req.body.cloudflareVideoId || id();
+  // Ownership SSOT: session UID only — never trust client userId (overwrite).
+  const ownerUserId = videoOwnership.resolveCreateVideoUserId(req.authUserId);
   const video = {
     id: videoId,
     ...body,
@@ -3139,7 +3154,7 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
     ...(heritageTypes.includes(bodyType) ? { species: bodyType } : {}),
     tags: heritageTB.sanitizeTags(body.tags, tagSpecies),
     badges: [],
-    userId: req.body.userId || req.authUserId,
+    userId: ownerUserId,
     createdAt: new Date().toISOString(),
     likes: req.body.likes ?? 0,
     likedBy: req.body.likedBy ?? [],
@@ -3153,14 +3168,53 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
   res.status(201).json(heritageTB.scrubItemTags(video));
 });
 
-app.patch('/videos/:id', auth, (req, res) => {
+app.patch('/videos/:id', auth, requireSessionUser, (req, res) => {
   const { id } = req.params;
   const existing = store.videos.get(id);
   if (!existing) return res.status(404).json({ message: 'الفيديو غير موجود' });
-  const body = heritageTB.applyClientListingFields(req.body || {}, existing);
+  const gate = videoOwnership.assertVideoOwner(req.authUserId, existing);
+  if (!gate.ok) {
+    return res.status(gate.status).json({ message: gate.message, code: gate.code });
+  }
+  const picked = videoOwnership.pickOwnerEditablePatch(req.body || {});
+  if (!picked.ok) {
+    return res.status(picked.status).json({ message: picked.message, code: picked.code });
+  }
+  const priceErr = videoOwnership.validatePrice(picked.patch.price);
+  if (priceErr) return res.status(400).json({ message: priceErr, code: 'VIDEO_PRICE_INVALID' });
+
+  if (picked.patch.location != null) {
+    const locErr = validateVideoLocation({
+      ...picked.patch,
+      location: picked.patch.location,
+      city: picked.patch.city || picked.patch.location?.city,
+    });
+    if (locErr) return res.status(400).json({ message: locErr, code: 'VIDEO_LOCATION_INVALID' });
+    picked.patch.location = normalizeVideoLocation({
+      ...picked.patch,
+      location: picked.patch.location,
+      city: picked.patch.city || picked.patch.location?.city,
+    });
+    if (picked.patch.location?.city) {
+      picked.patch.city = picked.patch.location.city;
+    }
+  }
+
+  // Soft-deleted videos cannot be republished via generic hidden:false alone.
+  if (
+    picked.patch.hidden === false &&
+    String(existing.status || '') === 'removed'
+  ) {
+    return res.status(400).json({
+      message: 'لا يمكن إعادة نشر إعلان محذوف',
+      code: 'VIDEO_REPUBLISH_DELETED',
+    });
+  }
+
+  const body = heritageTB.applyClientListingFields(picked.patch, existing);
   const tagSpecies =
-    req.body?.species ||
-    req.body?.targetSpecies ||
+    body.species ||
+    body.type ||
     existing.species ||
     existing.type ||
     'horse';
@@ -3168,11 +3222,99 @@ app.patch('/videos/:id', auth, (req, res) => {
     ...existing,
     ...body,
     id,
+    userId: existing.userId,
     badges: Array.isArray(existing.badges) ? existing.badges : [],
+    cloudflareVideoId: existing.cloudflareVideoId,
+    hlsUrl: existing.hlsUrl,
+    updatedAt: new Date().toISOString(),
   };
   updated.tags = heritageTB.sanitizeTags(updated.tags, tagSpecies);
   store.videos.set(id, updated);
   saveStore();
+  res.json(heritageTB.scrubItemTags(updated));
+});
+
+/** Soft-delete: hide + status removed. Does NOT delete Cloudflare media. */
+app.delete('/videos/:id', auth, requireSessionUser, (req, res) => {
+  const { id } = req.params;
+  const existing = store.videos.get(id);
+  if (!existing) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  const gate = videoOwnership.assertVideoOwner(req.authUserId, existing);
+  if (!gate.ok) {
+    return res.status(gate.status).json({ message: gate.message, code: gate.code });
+  }
+  const updated = videoOwnership.applySoftDelete(existing);
+  store.videos.set(id, updated);
+  saveStore();
+  res.json({ ok: true, video: heritageTB.scrubItemTags(updated) });
+});
+
+/**
+ * STAGE 3 — Safe media replacement.
+ * Client uploads NEW Stream asset first; server verifies playable HLS, then switches.
+ * Old UID retained for cleanup — never deleted before switch.
+ */
+app.post('/videos/:id/replace-media', auth, requireSessionUser, async (req, res) => {
+  const { id } = req.params;
+  const existing = store.videos.get(id);
+  if (!existing) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  const gate = videoOwnership.assertVideoOwner(req.authUserId, existing);
+  if (!gate.ok) {
+    return res.status(gate.status).json({ message: gate.message, code: gate.code });
+  }
+  if (String(existing.status || '') === 'removed') {
+    return res.status(400).json({
+      message: 'لا يمكن استبدال وسائط إعلان محذوف',
+      code: 'VIDEO_REPLACE_DELETED',
+    });
+  }
+
+  const uid = String(req.body?.cloudflareVideoId || req.body?.uid || '').trim();
+  if (!uid) {
+    return res.status(400).json({
+      message: 'معرّف الفيديو الجديد مطلوب',
+      code: 'VIDEO_REPLACE_UID_REQUIRED',
+    });
+  }
+
+  let streamDetails = null;
+  try {
+    const accountId = cfAccountId();
+    if (accountId && cfApiToken()) {
+      const data = await cfFetchJson(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/${uid}`,
+        { method: 'GET' },
+      );
+      streamDetails = data.result || data;
+    }
+  } catch (e) {
+    console.error('[videos/replace-media] stream lookup', e.message);
+  }
+
+  const validated = videoOwnership.validateReplaceMediaPayload(
+    req.body || {},
+    streamDetails,
+  );
+  if (!validated.ok) {
+    return res.status(validated.status).json({
+      message: validated.message,
+      code: validated.code,
+    });
+  }
+
+  const updated = videoOwnership.applyMediaSwitch(existing, validated.media);
+  store.videos.set(id, updated);
+  saveStore();
+  console.log(
+    '[videos/replace-media] switched',
+    id,
+    'old=',
+    updated.previousCloudflareVideoId,
+    'new=',
+    updated.cloudflareVideoId,
+    'cleanupQueue=',
+    (updated.pendingCleanupCloudflareVideoIds || []).join(','),
+  );
   res.json(heritageTB.scrubItemTags(updated));
 });
 
@@ -3858,6 +4000,33 @@ server.listen(PORT, HOST, async () => {
   } else {
     console.warn('[SMS] غير مفعّل —', sms.hint || 'أضف Taqnyat على Render');
   }
+
+  // Bounded Stream cleanup for replaced / soft-deleted videos (server-side only).
+  try {
+    const deleteStreamUid = videoMediaCleanup.createCloudflareStreamDeleter({
+      accountId: cfAccountId(),
+      apiToken: cfApiToken(),
+    });
+    const cleanupInterval = Number(
+      process.env.VIDEO_MEDIA_CLEANUP_INTERVAL_MS || 60_000,
+    );
+    const cleanupWorker = videoMediaCleanup.createVideoMediaCleanupWorker({
+      store,
+      saveStore,
+      deleteStreamUid,
+      intervalMs:
+        Number.isFinite(cleanupInterval) && cleanupInterval >= 15_000
+          ? cleanupInterval
+          : 60_000,
+    });
+    cleanupWorker.start();
+    console.log(
+      `[video-media-cleanup] worker started intervalMs=${cleanupInterval || 60000}`,
+    );
+  } catch (e) {
+    console.error('[video-media-cleanup] failed to start:', e.message);
+  }
+
   // إعلان mDNS حتى يصل الآيفون عبر horse-backend.local بدون إدخال IP
   try {
     const bonjour = require('bonjour')();

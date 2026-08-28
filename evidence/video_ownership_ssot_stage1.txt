@@ -1,0 +1,41 @@
+# NORMAL VIDEO OWNER MANAGEMENT SSOT
+
+## Ownership
+- `/videos.userId` = owner SSOT
+- Trusted actor = `req.authUserId` via `requireSessionUser`
+- Never trust client userId for create/update/replace
+
+## Stage 2 — Edit
+- Owner PATCH allowlist only (`EDITABLE_PATCH_KEYS`)
+- Media UID/HLS immutable on generic PATCH
+- `/videos` authoritative for Video Feed (no dual-write to `/horses`)
+- Owner sees own `hidden` videos on GET (republish)
+- Soft delete: `DELETE /videos/:id` → `hidden` + `status=removed`
+- Soft-delete enqueues Stream UID onto durable cleanup queue (async CF delete)
+- Feed overlay location remains distance-only
+
+## Stage 3 — Replace
+- `POST /videos/:id/replace-media` only
+- New media must have HTTPS HLS before switch
+- After switch: old UID appended to `pendingCleanupCloudflareVideoIds[]`
+- Legacy `pendingCleanupCloudflareVideoId` migrated into the array (never dropped)
+- Repeated replace: all prior old UIDs remain on the queue until CF delete succeeds
+- Server-side cleanup worker (`video_media_cleanup.js`) deletes queued UIDs only
+- Cleanup failure never rolls back canonical media; UID stays retryable
+- CF 404 / already-deleted = idempotent success
+- Never delete current live UID unless soft-deleted (`mediaCleanupAllowCurrentUid`)
+- Social counters preserved on same video id
+
+## Accepted secure limitations (NOT P1 blockers)
+- Legacy records without `userId` = fail-closed (no ownership guess)
+- Service Video Feed full editor = separate product surface (deferred)
+- Multi-image `images[]` = not part of `/videos` contract (product enhancement)
+
+## Forbidden
+- Client ownership authority
+- Client-side Cloudflare Stream delete
+- Arbitrary UID deletion (must be on that video's cleanup queue)
+- Non-owner PATCH / replace
+- Replacing via generic PATCH media fields
+- Deleting old Stream before new playback verified
+- Auction developer bypass on Haraj videos
