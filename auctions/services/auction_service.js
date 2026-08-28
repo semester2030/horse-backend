@@ -9,7 +9,7 @@ const {
   serverNow,
 } = require('../domain/states');
 const { acquireAuctionLock } = require('../domain/locking');
-const { assertSpecies, assertListingRef } = require('../domain/species');
+const { assertSpecies, assertListingRef, optionalListingRef } = require('../domain/species');
 const {
   ANTI_SNIPE_SECONDS,
   SETTLEMENT_NOTE,
@@ -22,11 +22,22 @@ function money(n) {
 function mapAuctionRow(row) {
   if (!row) return null;
   const { mapPublicLocation } = require('./location_snapshot');
+  let mediaImages = [];
+  if (Array.isArray(row.media_images)) {
+    mediaImages = row.media_images;
+  } else if (typeof row.media_images === 'string') {
+    try {
+      const parsed = JSON.parse(row.media_images);
+      if (Array.isArray(parsed)) mediaImages = parsed;
+    } catch (_) {
+      mediaImages = [];
+    }
+  }
   return {
     id: row.id,
     lotId: row.lot_id,
-    listingId: row.listing_id,
-    videoId: row.video_id,
+    listingId: row.listing_id || '',
+    videoId: row.video_id || '',
     ownerUserId: row.owner_user_id,
     createdByUserId: row.created_by_user_id,
     createdByRole: row.created_by_role,
@@ -53,6 +64,18 @@ function mapAuctionRow(row) {
     peakLiveViewers:
       row.peak_live_viewers != null ? Number(row.peak_live_viewers) : 0,
     location: mapPublicLocation(row),
+    description: row.description || null,
+    breed: row.breed || null,
+    gender: row.gender || null,
+    color: row.color || null,
+    ageLabel: row.age_label || null,
+    mediaImages,
+    mediaVideoCloudflareId: row.media_video_cloudflare_id || null,
+    mediaVideoHlsUrl: row.media_video_hls_url || null,
+    mediaVideoThumbnailUrl: row.media_video_thumbnail_url || null,
+    // Prefer auction-owned media; legacy enrich may override if empty
+    videoUrl: row.media_video_hls_url || null,
+    videoThumbnail: row.media_video_thumbnail_url || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -76,9 +99,20 @@ async function getLotByRefs(client, listingId, videoId) {
 
 async function upsertLot(client, { listingId, videoId, species, title }) {
   const sp = assertSpecies(species);
-  const refs = assertListingRef(listingId, videoId);
-  const existing = await getLotByRefs(client, refs.listingId, refs.videoId);
-  if (existing) return existing;
+  const hasLegacy = String(listingId || '').trim() && String(videoId || '').trim();
+  if (hasLegacy) {
+    const refs = assertListingRef(listingId, videoId);
+    const existing = await getLotByRefs(client, refs.listingId, refs.videoId);
+    if (existing) return existing;
+    const { rows } = await client.query(
+      `INSERT INTO auction_lots (listing_id, video_id, species, title)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [refs.listingId, refs.videoId, sp, title || null],
+    );
+    return rows[0];
+  }
+  const refs = optionalListingRef(listingId, videoId);
   const { rows } = await client.query(
     `INSERT INTO auction_lots (listing_id, video_id, species, title)
      VALUES ($1, $2, $3, $4)
@@ -124,16 +158,37 @@ async function createAuctionDraft(client, input) {
   }
 
   const loc = input.locationSnapshot || null;
+  const media = input.media || {};
+  const independentLot =
+    !String(input.listingId || '').trim() && !String(input.videoId || '').trim();
+  if (independentLot) {
+    const { isPlayableAuctionHlsUrl } = require('./ownership_validation');
+    if (!isPlayableAuctionHlsUrl(media.mediaVideoHlsUrl)) {
+      const err = new Error(
+        'Independent auction requires a usable HTTPS HLS/playback URL',
+      );
+      err.code = 'AUCTION_VIDEO_PLAYBACK_REQUIRED';
+      err.status = 400;
+      throw err;
+    }
+  }
+  const mediaImagesJson = JSON.stringify(
+    Array.isArray(media.mediaImages) ? media.mediaImages : [],
+  );
   const { rows } = await client.query(
     `INSERT INTO auctions (
       lot_id, owner_user_id, created_by_user_id, created_by_role, owner_consent_ref,
       species, status, starting_price, minimum_increment, reserve_price, current_price,
       start_at, end_at, anti_sniping_seconds, settlement_note,
       location_city, location_district, location_address,
-      location_lat, location_lng, location_source_listing_id, location_captured_at
+      location_lat, location_lng, location_source_listing_id, location_captured_at,
+      media_video_cloudflare_id, media_video_hls_url, media_video_thumbnail_url, media_images,
+      description, breed, gender, color, age_label
     ) VALUES (
       $1,$2,$3,$4,$5,$6,'draft',$7,$8,$9,$7,$10,$11,$12,$13,
-      $14,$15,$16,$17,$18,$19,$20
+      $14,$15,$16,$17,$18,$19,$20,
+      $21,$22,$23,$24::jsonb,
+      $25,$26,$27,$28,$29
     )
     RETURNING *`,
     [
@@ -157,6 +212,15 @@ async function createAuctionDraft(client, input) {
       loc?.lng != null ? Number(loc.lng) : null,
       loc?.sourceListingId || null,
       loc?.capturedAt || null,
+      media.mediaVideoCloudflareId || null,
+      media.mediaVideoHlsUrl || null,
+      media.mediaVideoThumbnailUrl || null,
+      mediaImagesJson,
+      input.description || null,
+      input.breed || null,
+      input.gender || null,
+      input.color || null,
+      input.ageLabel || input.age || null,
     ],
   );
 

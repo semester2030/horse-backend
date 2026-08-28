@@ -73,6 +73,51 @@ function requireListingLocationSnapshot(listing) {
   return { ok: true, snapshot };
 }
 
+/**
+ * Independent auction create — owner-supplied location (validated Saudi bounds).
+ * Accepts body.location or flat lat/lng/city fields.
+ */
+function requireAuctionOwnerLocation(body) {
+  const src =
+    body && typeof body.location === 'object' && body.location
+      ? body.location
+      : body || {};
+  const lat = num(src.lat ?? src.latitude);
+  const lng = num(src.lng ?? src.longitude);
+  const city = str(src.city);
+  const district = str(src.district);
+  const address = str(src.address || src.displayAddress);
+  if (lat == null || lng == null || !city) {
+    return {
+      ok: false,
+      code: 'AUCTION_LOCATION_REQUIRED',
+      message:
+        'Auction location requires city + valid Saudi coordinates (lat/lng)',
+      status: 400,
+    };
+  }
+  if (!inSaudi(lat, lng)) {
+    return {
+      ok: false,
+      code: 'AUCTION_LOCATION_OUT_OF_BOUNDS',
+      message: 'Auction location must be within Saudi Arabia bounds',
+      status: 400,
+    };
+  }
+  return {
+    ok: true,
+    snapshot: {
+      city,
+      district,
+      address,
+      lat,
+      lng,
+      sourceListingId: null,
+      capturedAt: new Date().toISOString(),
+    },
+  };
+}
+
 function displayLabel(snapshotOrRow) {
   if (!snapshotOrRow) return null;
   const city =
@@ -114,6 +159,7 @@ function mapAdminLocation(row) {
 module.exports = {
   extractLocationFromListing,
   requireListingLocationSnapshot,
+  requireAuctionOwnerLocation,
   displayLabel,
   mapPublicLocation,
   mapAdminLocation,

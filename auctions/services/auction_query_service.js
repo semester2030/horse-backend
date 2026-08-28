@@ -13,7 +13,17 @@ const {
 const { mapPublicLocation } = require('./location_snapshot');
 
 function enrichVideoFromStore(auction, store) {
-  if (!auction || !store?.videos) return auction;
+  if (!auction) return auction;
+  // Auction-owned media wins; never overwrite with store if already set.
+  if (auction.videoUrl || auction.mediaVideoHlsUrl) {
+    return {
+      ...auction,
+      videoUrl: auction.videoUrl || auction.mediaVideoHlsUrl || null,
+      videoThumbnail:
+        auction.videoThumbnail || auction.mediaVideoThumbnailUrl || null,
+    };
+  }
+  if (!store?.videos) return auction;
   const vid = auction.videoId;
   if (!vid) return auction;
   const v = store.videos.get(String(vid));

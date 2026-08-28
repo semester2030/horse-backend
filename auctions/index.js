@@ -4,7 +4,16 @@ const {
   ENABLE_AUCTIONS,
   AUCTIONS_DATABASE_URL,
 } = require('./config');
-const { isDbConfigured, runMigrations, closePool } = require('./db');
+const {
+  isDbConfigured,
+  runMigrations,
+  closePool,
+  areMigrationsReady,
+  getSchemaVersion,
+  getLastMigrationError,
+  REQUIRED_MIGRATION_ID,
+  markMigrationsNotReady,
+} = require('./db');
 const {
   registerAuctionRoutes,
   registerAuctionAdminRoutes,
@@ -16,33 +25,113 @@ const {
 } = require('./services/lifecycle_worker');
 
 let lifecycleWorker = null;
+let bootState = {
+  enabled: false,
+  dbConfigured: false,
+  migrationsReady: false,
+  schemaVersion: null,
+  ready: false,
+  reason: null,
+};
+
+function syncBootFromDb(extra = {}) {
+  bootState = {
+    enabled: ENABLE_AUCTIONS,
+    dbConfigured: isDbConfigured(),
+    migrationsReady: areMigrationsReady(),
+    schemaVersion: getSchemaVersion(),
+    ready: ENABLE_AUCTIONS && isDbConfigured() && areMigrationsReady(),
+    reason: getLastMigrationError(),
+    requiredMigrationId: REQUIRED_MIGRATION_ID,
+    ...extra,
+  };
+  return { ...bootState };
+}
+
+/**
+ * Safe public health/status block — no secrets.
+ */
+function getAuctionsPublicStatus() {
+  return {
+    enabled: ENABLE_AUCTIONS,
+    dbConfigured: isDbConfigured(),
+    postgresConfigured: isDbConfigured(),
+    migrationsReady: areMigrationsReady(),
+    schemaVersion: getSchemaVersion(),
+    requiredMigrationId: REQUIRED_MIGRATION_ID,
+    ready: bootState.ready === true,
+    storeReleaseImpact: ENABLE_AUCTIONS
+      ? 'isolated module'
+      : 'none — feature OFF',
+  };
+}
+
+function areAuctionsReady() {
+  return bootState.ready === true && areMigrationsReady();
+}
 
 async function initAuctionsModule() {
   if (!ENABLE_AUCTIONS) {
-    console.log('[auctions] DISABLED (ENABLE_AUCTIONS=false) — Store Release v1 unaffected');
-    return { enabled: false, ready: false };
+    console.log(
+      '[auctions] DISABLED (ENABLE_AUCTIONS=false) — Store Release v1 unaffected',
+    );
+    bootState = {
+      enabled: false,
+      dbConfigured: false,
+      migrationsReady: false,
+      schemaVersion: null,
+      ready: false,
+      reason: 'AUCTIONS_DISABLED',
+      requiredMigrationId: REQUIRED_MIGRATION_ID,
+    };
+    return { ...bootState };
   }
   if (!isDbConfigured()) {
     console.warn(
       '[auctions] ENABLED but AUCTIONS_DATABASE_URL missing — routes return 503 until configured',
     );
-    return { enabled: true, ready: false, reason: 'AUCTIONS_DATABASE_URL missing' };
+    markMigrationsNotReady('AUCTIONS_DATABASE_URL missing');
+    bootState = {
+      enabled: true,
+      dbConfigured: false,
+      migrationsReady: false,
+      schemaVersion: null,
+      ready: false,
+      reason: 'AUCTIONS_DATABASE_URL missing',
+      requiredMigrationId: REQUIRED_MIGRATION_ID,
+    };
+    return { ...bootState };
   }
-  const migration = await runMigrations();
-  console.log(
-    `[auctions] PostgreSQL ready migration=${migration.id} applied=${migration.applied}`,
-  );
-  return {
-    enabled: true,
-    ready: true,
-    migration,
-    audioDecision,
-  };
+  try {
+    const migration = await runMigrations();
+    const state = syncBootFromDb({
+      migration,
+      audioDecision,
+      reason: null,
+    });
+    console.log(
+      `[auctions] PostgreSQL ready schema=${migration.schemaVersion} applied=${migration.applied} migrationsReady=${migration.migrationsReady}`,
+    );
+    return state;
+  } catch (err) {
+    markMigrationsNotReady(err.message);
+    bootState = {
+      enabled: true,
+      dbConfigured: true,
+      migrationsReady: false,
+      schemaVersion: getSchemaVersion(),
+      ready: false,
+      reason: err.message,
+      requiredMigrationId: REQUIRED_MIGRATION_ID,
+    };
+    console.error('[auctions] migration/init failed — fail closed:', err.message);
+    return { ...bootState };
+  }
 }
 
 function startAuctionsLifecycle({ auctionRealtime } = {}) {
   if (lifecycleWorker) return lifecycleWorker;
-  if (!ENABLE_AUCTIONS || !isDbConfigured()) return null;
+  if (!ENABLE_AUCTIONS || !areAuctionsReady()) return null;
   lifecycleWorker = startAuctionLifecycleWorker({ auctionRealtime });
   return lifecycleWorker;
 }
@@ -78,4 +167,7 @@ module.exports = {
   AUCTIONS_DATABASE_URL,
   isDbConfigured,
   closePool,
+  areAuctionsReady,
+  getAuctionsPublicStatus,
+  REQUIRED_MIGRATION_ID,
 };

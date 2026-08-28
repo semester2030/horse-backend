@@ -2,7 +2,13 @@
 
 const express = require('express');
 const { ENABLE_AUCTIONS, SETTLEMENT_NOTE } = require('./config');
-const { withTransaction, isDbConfigured } = require('./db');
+const {
+  withTransaction,
+  isDbConfigured,
+  areMigrationsReady,
+  getSchemaVersion,
+  REQUIRED_MIGRATION_ID,
+} = require('./db');
 const {
   createAuctionDraft,
   transitionAuction,
@@ -44,7 +50,10 @@ const { PRE_AUDIO_CONTRACT } = require('./audio/pre_audio_contract');
 const { createAuctionAudioProvider } = require('./audio');
 const { assertSpecies } = require('./domain/species');
 const { isAuctionDeveloperUserId } = require('./dev_testing');
-const { validateAuctionAssetOwnership } = require('./services/ownership_validation');
+const {
+  validateAuctionAssetOwnership,
+  validateIndependentAuctionCreate,
+} = require('./services/ownership_validation');
 const {
   scheduleAuctionIfEligible,
   approveAuctionReview,
@@ -85,6 +94,14 @@ function auctionsFeatureGate(req, res, next) {
       code: 'AUCTIONS_DB_MISSING',
     });
   }
+  if (!areMigrationsReady()) {
+    return res.status(503).json({
+      message: 'Auctions schema migrations not ready',
+      code: 'AUCTIONS_MIGRATIONS_NOT_READY',
+      requiredMigrationId: REQUIRED_MIGRATION_ID,
+      schemaVersion: getSchemaVersion(),
+    });
+  }
   next();
 }
 
@@ -100,6 +117,10 @@ function registerAuctionRoutes(app, ctx) {
     res.json({
       enabled: ENABLE_AUCTIONS,
       dbConfigured: isDbConfigured(),
+      migrationsReady: areMigrationsReady(),
+      schemaVersion: getSchemaVersion(),
+      requiredMigrationId: REQUIRED_MIGRATION_ID,
+      ready: ENABLE_AUCTIONS && isDbConfigured() && areMigrationsReady(),
       audioProvider: audio.name,
       audioConfigured: audio.isConfigured,
       audioWired: audio.name !== 'noop' && audio.isConfigured,
@@ -112,6 +133,7 @@ function registerAuctionRoutes(app, ctx) {
   const queryService = require('./services/auction_query_service');
   const {
     requireListingLocationSnapshot,
+    requireAuctionOwnerLocation,
   } = require('./services/location_snapshot');
   const { recordQualifiedView, getBidAggregates, getExtensionsCount } = require('./services/metrics_service');
 
@@ -255,27 +277,59 @@ function registerAuctionRoutes(app, ctx) {
         }
       }
 
-      const ownership = validateAuctionAssetOwnership(ctx.store, {
-        listingId: body.listingId,
-        videoId: body.videoId,
-        species,
-        ownerUserId,
-      });
-      if (!ownership.ok) {
-        return res.status(ownership.status).json({
-          message: ownership.message,
-          code: ownership.code,
-        });
-      }
+      const listingId = String(body.listingId || '').trim();
+      const videoId = String(body.videoId || '').trim();
+      const independentMode =
+        body.independent === true ||
+        body.mode === 'independent' ||
+        (!listingId && !videoId);
 
-      // Authoritative location from listing — ignore any client lat/lng/location body.
-      const listing = ctx.store.horses.get(String(body.listingId));
-      const locResult = requireListingLocationSnapshot(listing);
-      if (!locResult.ok) {
-        return res.status(locResult.status).json({
-          message: locResult.message,
-          code: locResult.code,
+      let locResult;
+      let media = null;
+
+      if (independentMode) {
+        const independent = validateIndependentAuctionCreate({
+          ...body,
+          ownerUserId,
+          species,
         });
+        if (!independent.ok) {
+          return res.status(independent.status).json({
+            message: independent.message,
+            code: independent.code,
+          });
+        }
+        media = independent.media;
+        locResult = requireAuctionOwnerLocation(body);
+        if (!locResult.ok) {
+          return res.status(locResult.status).json({
+            message: locResult.message,
+            code: locResult.code,
+          });
+        }
+      } else {
+        const ownership = validateAuctionAssetOwnership(ctx.store, {
+          listingId,
+          videoId,
+          species,
+          ownerUserId,
+        });
+        if (!ownership.ok) {
+          return res.status(ownership.status).json({
+            message: ownership.message,
+            code: ownership.code,
+          });
+        }
+
+        // LEGACY: Authoritative location from listing — ignore client lat/lng.
+        const listing = ctx.store.horses.get(listingId);
+        locResult = requireListingLocationSnapshot(listing);
+        if (!locResult.ok) {
+          return res.status(locResult.status).json({
+            message: locResult.message,
+            code: locResult.code,
+          });
+        }
       }
 
       const requiresHost = body.requiresHost === true;
@@ -292,10 +346,15 @@ function registerAuctionRoutes(app, ctx) {
         }
 
         return createAuctionDraft(client, {
-          listingId: body.listingId,
-          videoId: body.videoId,
+          listingId: independentMode ? null : listingId,
+          videoId: independentMode ? null : videoId,
           species,
           title: body.title,
+          description: body.description,
+          breed: body.breed,
+          gender: body.gender,
+          color: body.color,
+          ageLabel: body.ageLabel || body.age,
           ownerUserId,
           createdByUserId: req.authUserId,
           createdByRole,
@@ -308,6 +367,7 @@ function registerAuctionRoutes(app, ctx) {
           antiSnipingSeconds: body.antiSnipingSeconds,
           requiresHost,
           locationSnapshot: locResult.snapshot,
+          media,
         });
       });
       res.status(201).json({ auction });

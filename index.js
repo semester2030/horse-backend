@@ -61,6 +61,7 @@ const {
   startAuctionsLifecycle,
   ENABLE_AUCTIONS,
   isDbConfigured: isAuctionsDbConfigured,
+  getAuctionsPublicStatus,
 } = require('./auctions');
 
 let swaggerDocument;
@@ -696,9 +697,9 @@ app.get('/health', (req, res) => {
       haReady: false,
     },
     auctions: {
-      enabled: ENABLE_AUCTIONS,
-      postgresConfigured: isAuctionsDbConfigured(),
-      storeReleaseImpact: ENABLE_AUCTIONS ? 'isolated module' : 'none — feature OFF',
+      ...getAuctionsPublicStatus(),
+      // ENABLE_AUCTIONS mirrored for health isolation tests
+      featureFlag: ENABLE_AUCTIONS,
     },
   };
   if (!isProductionEnv()) {

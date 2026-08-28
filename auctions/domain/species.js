@@ -25,8 +25,16 @@ function assertListingRef(listingId, videoId) {
   return { listingId: lid, videoId: vid };
 }
 
+/** Optional legacy refs — empty strings become null for independent lots. */
+function optionalListingRef(listingId, videoId) {
+  const lid = String(listingId || '').trim() || null;
+  const vid = String(videoId || '').trim() || null;
+  return { listingId: lid, videoId: vid };
+}
+
 module.exports = {
   ALLOWED_SPECIES,
   assertSpecies,
   assertListingRef,
+  optionalListingRef,
 };

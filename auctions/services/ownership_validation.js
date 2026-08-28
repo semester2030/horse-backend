@@ -35,9 +35,99 @@ function videoLinkedToListing(video, listingId, listing) {
   return false;
 }
 
+function normalizeMediaImages(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const u = item.trim();
+      if (u.startsWith('http://') || u.startsWith('https://')) out.push(u);
+      continue;
+    }
+    if (item && typeof item === 'object') {
+      const u = String(item.url || item.src || item.uri || '').trim();
+      if (u.startsWith('http://') || u.startsWith('https://')) out.push(u);
+    }
+  }
+  return out.slice(0, 15);
+}
+
 /**
- * Server-side ownership + asset linkage for POST /auctions.
- * @returns {{ ok: true } | { ok: false, code: string, message: string, status: number }}
+ * Usable playback URL for auction-owned Cloudflare Stream HLS.
+ * Cloudflare id alone is not enough — the app must have an HTTPS HLS/manifest URL.
+ */
+function isPlayableAuctionHlsUrl(url) {
+  const u = String(url || '').trim();
+  if (!u.startsWith('https://')) return false;
+  const lower = u.toLowerCase();
+  if (lower.includes('.m3u8')) return true;
+  if (lower.includes('videodelivery.net') && lower.includes('manifest')) return true;
+  if (lower.includes('cloudflarestream.com') && lower.includes('manifest')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Independent auction create — no listing/video store dependency.
+ * Requires a playable HLS/playback URL (Cloudflare id alone is rejected).
+ */
+function validateIndependentAuctionCreate(input) {
+  const ownerUserId = String(input.ownerUserId || '').trim();
+  const species = String(input.species || '').trim().toLowerCase();
+  const hls = String(input.mediaVideoHlsUrl || input.videoUrl || '').trim();
+  const cfId = String(
+    input.mediaVideoCloudflareId || input.cloudflareVideoId || '',
+  ).trim();
+
+  if (!ownerUserId) {
+    return {
+      ok: false,
+      code: 'AUCTION_OWNER_REQUIRED',
+      message: 'ownerUserId is required',
+      status: 400,
+    };
+  }
+  if (!ALLOWED_SPECIES.includes(species)) {
+    return {
+      ok: false,
+      code: 'AUCTION_SPECIES_INVALID',
+      message: 'Species not eligible for auctions V1',
+      status: 400,
+    };
+  }
+  if (!hls && !cfId) {
+    return {
+      ok: false,
+      code: 'AUCTION_MEDIA_VIDEO_REQUIRED',
+      message: 'Auction-owned video (HLS URL or Cloudflare id) is required',
+      status: 400,
+    };
+  }
+  if (!isPlayableAuctionHlsUrl(hls)) {
+    return {
+      ok: false,
+      code: 'AUCTION_VIDEO_PLAYBACK_REQUIRED',
+      message:
+        'Independent auction requires a usable HTTPS HLS/playback URL (Cloudflare id alone is not enough)',
+      status: 400,
+    };
+  }
+  return {
+    ok: true,
+    media: {
+      mediaVideoCloudflareId: cfId || null,
+      mediaVideoHlsUrl: hls,
+      mediaVideoThumbnailUrl:
+        String(input.mediaVideoThumbnailUrl || input.videoThumbnail || '').trim() ||
+        null,
+      mediaImages: normalizeMediaImages(input.mediaImages || input.images),
+    },
+  };
+}
+
+/**
+ * LEGACY listing+video ownership for POST /auctions.
  */
 function validateAuctionAssetOwnership(store, input) {
   if (!store || !store.horses || !store.videos) {
@@ -155,6 +245,9 @@ function validateAuctionAssetOwnership(store, input) {
 
 module.exports = {
   validateAuctionAssetOwnership,
+  validateIndependentAuctionCreate,
+  normalizeMediaImages,
+  isPlayableAuctionHlsUrl,
   listingOwnerId,
   videoOwnerId,
   listingSpecies,
