@@ -11,9 +11,11 @@ const {
 } = require('./db');
 const {
   createAuctionDraft,
+  updateSellerDraft,
   transitionAuction,
   closeAuctionAtomic,
   mapAuctionRow,
+  appendEvent,
 } = require('./services/auction_service');
 const { placeBid } = require('./services/bid_service');
 const {
@@ -55,9 +57,20 @@ const {
   validateIndependentAuctionCreate,
 } = require('./services/ownership_validation');
 const {
+  isHarajChannel,
+  assertNoOwnershipSpoof,
+  applyHarajCreateDefaults,
+  validateHarajSellerPayload,
+  normalizeInspection,
+} = require('./services/haraj_seller_submission');
+const {
   scheduleAuctionIfEligible,
   approveAuctionReview,
 } = require('./services/approval_flow');
+const {
+  assertOwnerForLifecycle,
+  assertManualGoLiveTimeAllowed,
+} = require('./services/lifecycle_auth');
 const { getPool } = require('./db');
 const { freezeAuction, resumeAuction, adminCancelAuction } = require('./services/ops_service');
 const {
@@ -136,6 +149,21 @@ function registerAuctionRoutes(app, ctx) {
     requireAuctionOwnerLocation,
   } = require('./services/location_snapshot');
   const { recordQualifiedView, getBidAggregates, getExtensionsCount } = require('./services/metrics_service');
+
+  router.get('/mine', auth, requireSessionUser, async (req, res) => {
+    try {
+      const { getPool } = require('./db');
+      const list = await queryService.listSellerAuctions(getPool(), req.authUserId, {
+        limit: req.query.limit,
+      });
+      res.json({
+        auctions: list,
+        serverTime: new Date().toISOString(),
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message, code: 'AUCTION_MINE_ERROR' });
+    }
+  });
 
   router.get('/', async (req, res) => {
     try {
@@ -243,10 +271,42 @@ function registerAuctionRoutes(app, ctx) {
 
   router.post('/', auth, requireSessionUser, async (req, res) => {
     try {
-      const body = req.body || {};
+      const rawBody = req.body || {};
+      const haraj = isHarajChannel(rawBody);
+      const spoof = assertNoOwnershipSpoof(rawBody, req.authUserId, {
+        allowHostProxyOwner:
+          rawBody.createdByRole === 'host_proxy' && !haraj,
+      });
+      if (!spoof.ok) {
+        return res.status(spoof.status).json({
+          message: spoof.message,
+          code: spoof.code,
+        });
+      }
+
+      const body = haraj ? applyHarajCreateDefaults(rawBody) : rawBody;
+      let harajMeta = null;
+      if (haraj) {
+        const hv = validateHarajSellerPayload(body);
+        if (!hv.ok) {
+          return res.status(hv.status).json({
+            message: hv.message,
+            code: hv.code,
+          });
+        }
+        harajMeta = hv;
+        body.title = hv.title;
+        body.description = hv.description;
+        body.species = hv.species;
+      }
+
       const species = assertSpecies(body.species);
       const createdByRole =
-        body.createdByRole === 'host_proxy' ? 'host_proxy' : 'seller';
+        haraj
+          ? 'seller'
+          : body.createdByRole === 'host_proxy'
+            ? 'host_proxy'
+            : 'seller';
       const ownerUserId =
         createdByRole === 'host_proxy'
           ? String(body.ownerUserId || '')
@@ -280,6 +340,7 @@ function registerAuctionRoutes(app, ctx) {
       const listingId = String(body.listingId || '').trim();
       const videoId = String(body.videoId || '').trim();
       const independentMode =
+        haraj ||
         body.independent === true ||
         body.mode === 'independent' ||
         (!listingId && !videoId);
@@ -332,7 +393,7 @@ function registerAuctionRoutes(app, ctx) {
         }
       }
 
-      const requiresHost = body.requiresHost === true;
+      const requiresHost = haraj ? false : body.requiresHost === true;
 
       const auction = await withTransaction(async (client) => {
         if (createdByRole === 'host_proxy') {
@@ -345,7 +406,7 @@ function registerAuctionRoutes(app, ctx) {
           }
         }
 
-        return createAuctionDraft(client, {
+        const created = await createAuctionDraft(client, {
           listingId: independentMode ? null : listingId,
           videoId: independentMode ? null : videoId,
           species,
@@ -369,6 +430,26 @@ function registerAuctionRoutes(app, ctx) {
           locationSnapshot: locResult.snapshot,
           media,
         });
+        if (haraj && harajMeta) {
+          await appendEvent(client, {
+            auctionId: created.id,
+            eventType: 'haraj.seller.draft_created',
+            payload: {
+              channel: 'haraj',
+              inspection: harajMeta.inspection,
+              commercialAuthority: {
+                startingPrice: 'SELLER',
+                reservePrice: 'SELLER_OPTIONAL',
+                minimumIncrement: 'SYSTEM',
+                startAtEndAt: 'SYSTEM_PLACEHOLDER_NOT_ROOM',
+                currentPrice: 'SYSTEM',
+                roomQueue: 'NOT_SUPPORTED',
+              },
+            },
+            actorUserId: req.authUserId,
+          });
+        }
+        return created;
       });
       res.status(201).json({ auction });
     } catch (err) {
@@ -379,21 +460,110 @@ function registerAuctionRoutes(app, ctx) {
     }
   });
 
+  router.patch('/:id', auth, requireSessionUser, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const spoof = assertNoOwnershipSpoof(body, req.authUserId);
+      if (!spoof.ok) {
+        return res.status(spoof.status).json({
+          message: spoof.message,
+          code: spoof.code,
+        });
+      }
+      const forbidden = require('./services/haraj_seller_submission')
+        .rejectForbiddenSellerControls(body);
+      if (!forbidden.ok) {
+        return res.status(forbidden.status).json({
+          message: forbidden.message,
+          code: forbidden.code,
+        });
+      }
+
+      let locSnapshot;
+      if (body.location) {
+        const locResult = requireAuctionOwnerLocation(body);
+        if (!locResult.ok) {
+          return res.status(locResult.status).json({
+            message: locResult.message,
+            code: locResult.code,
+          });
+        }
+        locSnapshot = locResult.snapshot;
+      }
+
+      let media;
+      if (body.mediaVideoHlsUrl || body.mediaVideoCloudflareId) {
+        const independent = validateIndependentAuctionCreate({
+          ...body,
+          ownerUserId: req.authUserId,
+          species: body.species || 'horse',
+        });
+        if (!independent.ok) {
+          return res.status(independent.status).json({
+            message: independent.message,
+            code: independent.code,
+          });
+        }
+        media = independent.media;
+      } else if (Array.isArray(body.mediaImages)) {
+        media = { mediaImages: body.mediaImages };
+      }
+
+      let description = body.description;
+      if (body.inspection) {
+        const parsed = normalizeInspection(body.inspection);
+        if (parsed.error) {
+          return res.status(parsed.error.status).json({
+            message: parsed.error.message,
+            code: parsed.error.code,
+          });
+        }
+        const {
+          mergeDescriptionWithInspection,
+        } = require('./services/haraj_seller_submission');
+        description = mergeDescriptionWithInspection(
+          body.description,
+          parsed.value,
+        );
+      }
+
+      const auction = await withTransaction(async (client) =>
+        updateSellerDraft(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          patch: {
+            title: body.title,
+            description,
+            breed: body.breed,
+            gender: body.gender,
+            color: body.color,
+            ageLabel: body.ageLabel || body.age,
+            startingPrice: body.startingPrice,
+            reservePrice: body.reservePrice,
+            locationSnapshot: locSnapshot,
+            media,
+          },
+        }),
+      );
+      res.json({ auction });
+    } catch (err) {
+      res.status(err.status || 500).json({
+        message: err.message,
+        code: err.code || 'AUCTION_PATCH_ERROR',
+      });
+    }
+  });
+
   router.post('/:id/submit-review', auth, requireSessionUser, async (req, res) => {
     try {
+      const submitBody = req.body || {};
       let beforeStatus;
       const auction = await withTransaction(async (client) => {
-        const { rows } = await client.query(
-          'SELECT status, owner_user_id FROM auctions WHERE id = $1',
-          [req.params.id],
+        const row = await assertOwnerForLifecycle(
+          client,
+          req.params.id,
+          req.authUserId,
         );
-        const row = rows[0];
-        if (!row) {
-          const err = new Error('Auction not found');
-          err.code = 'AUCTION_NOT_FOUND';
-          err.status = 404;
-          throw err;
-        }
         beforeStatus = row.status;
         let result;
         if (row.status === 'draft') {
@@ -414,10 +584,38 @@ function registerAuctionRoutes(app, ctx) {
           throw err;
         }
 
-        if (isAuctionDeveloperUserId(row.owner_user_id)) {
+        if (
+          String(row.owner_user_id) === String(req.authUserId) &&
+          isAuctionDeveloperUserId(row.owner_user_id)
+        ) {
           result = await approveAuctionReview(client, req.params.id, req.authUserId, {
             bypass: 'developer',
             reason: 'owner_developer_exemption',
+          });
+        }
+
+        if (isHarajChannel(submitBody) || submitBody.inspection) {
+          let inspection = null;
+          if (submitBody.inspection) {
+            const parsed = normalizeInspection(submitBody.inspection);
+            if (parsed.error) {
+              const err = new Error(parsed.error.message);
+              err.code = parsed.error.code;
+              err.status = parsed.error.status;
+              throw err;
+            }
+            inspection = parsed.value;
+          }
+          await appendEvent(client, {
+            auctionId: req.params.id,
+            eventType: 'haraj.seller.submitted',
+            payload: {
+              channel: 'haraj',
+              fromStatus: beforeStatus,
+              toStatus: result.status,
+              inspection,
+            },
+            actorUserId: req.authUserId,
           });
         }
 
@@ -436,10 +634,12 @@ function registerAuctionRoutes(app, ctx) {
     try {
       let beforeStatus;
       const auction = await withTransaction(async (client) => {
-        const { rows } = await client.query('SELECT status FROM auctions WHERE id = $1', [
+        const row = await assertOwnerForLifecycle(
+          client,
           req.params.id,
-        ]);
-        beforeStatus = rows[0]?.status;
+          req.authUserId,
+        );
+        beforeStatus = row.status;
         return scheduleAuctionIfEligible(client, req.params.id, req.authUserId);
       });
       if (auctionRealtime) {
@@ -455,10 +655,13 @@ function registerAuctionRoutes(app, ctx) {
     try {
       let beforeStatus;
       const auction = await withTransaction(async (client) => {
-        const { rows } = await client.query('SELECT status FROM auctions WHERE id = $1', [
+        const row = await assertOwnerForLifecycle(
+          client,
           req.params.id,
-        ]);
-        beforeStatus = rows[0]?.status;
+          req.authUserId,
+        );
+        beforeStatus = row.status;
+        assertManualGoLiveTimeAllowed(row);
         await transitionAuction(client, req.params.id, 'live', {
           actorUserId: req.authUserId,
         });
@@ -520,6 +723,7 @@ function registerAuctionRoutes(app, ctx) {
     try {
       let closedPayload;
       const auction = await withTransaction(async (client) => {
+        await assertOwnerForLifecycle(client, req.params.id, req.authUserId);
         const closed = await closeAuctionAtomic(client, req.params.id, {
           actorUserId: req.authUserId,
         });

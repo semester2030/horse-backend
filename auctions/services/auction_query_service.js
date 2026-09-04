@@ -76,6 +76,30 @@ function sanitizePublicBid(bid) {
   };
 }
 
+async function listSellerAuctions(pool, ownerUserId, { limit = 50 } = {}) {
+  const owner = String(ownerUserId || '').trim();
+  if (!owner) return [];
+  const cap = Math.min(Number(limit) || 50, 100);
+  const sql = `
+    SELECT a.*, l.listing_id, l.video_id, l.title AS lot_title
+    FROM auctions a
+    JOIN auction_lots l ON l.id = a.lot_id
+    WHERE a.owner_user_id = $1
+    ORDER BY a.updated_at DESC NULLS LAST, a.created_at DESC
+    LIMIT $2`;
+  const { rows } = await pool.query(sql, [owner, cap]);
+  const now = new Date();
+  return rows.map((row) => {
+    const a = mapAuctionRow(row);
+    a.lotTitle = row.lot_title;
+    a.serverTime = now.toISOString();
+    a.effectiveEndAt = effectiveEndAt(row, now).toISOString();
+    a.nextValidBid = Number(a.currentPrice) + Number(a.minimumIncrement);
+    a.nextMinimumBid = a.nextValidBid;
+    return a;
+  });
+}
+
 async function listAuctions(pool, { bucket, species, videoId, limit = 50 } = {}) {
   const clauses = [];
   const params = [];
@@ -274,6 +298,7 @@ async function getHostBookingForAuction(pool, auctionId) {
 
 module.exports = {
   listAuctions,
+  listSellerAuctions,
   getAuctionById,
   listBids,
   getHostBookingForAuction,

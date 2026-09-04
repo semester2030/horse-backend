@@ -394,11 +394,141 @@ async function closeAuctionAtomic(client, auctionId, { actorUserId = 'system' } 
   return mapAuctionRow(finalRows[0]);
 }
 
+async function updateSellerDraft(client, { auctionId, actorUserId, patch }) {
+  const id = String(auctionId || '').trim();
+  const actor = String(actorUserId || '').trim();
+  const { rows } = await client.query(
+    `SELECT a.*, l.listing_id, l.video_id, l.title AS lot_title
+     FROM auctions a
+     JOIN auction_lots l ON l.id = a.lot_id
+     WHERE a.id = $1
+     FOR UPDATE`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) {
+    const err = new Error('Auction not found');
+    err.code = 'AUCTION_NOT_FOUND';
+    err.status = 404;
+    throw err;
+  }
+  if (String(row.owner_user_id) !== actor) {
+    const err = new Error('Only the lot owner may edit this draft');
+    err.code = 'AUCTION_OWNER_FORBIDDEN';
+    err.status = 403;
+    throw err;
+  }
+  if (row.status !== 'draft') {
+    const err = new Error('Material fields cannot be edited after submission');
+    err.code = 'AUCTION_EDIT_LOCKED';
+    err.status = 409;
+    throw err;
+  }
+
+  const next = { ...patch };
+  const starting =
+    next.startingPrice != null ? money(next.startingPrice) : Number(row.starting_price);
+  const reserve =
+    next.reservePrice === null
+      ? null
+      : next.reservePrice != null
+        ? money(next.reservePrice)
+        : row.reserve_price != null
+          ? Number(row.reserve_price)
+          : null;
+  if (next.startingPrice != null && starting <= 0) {
+    const err = new Error('startingPrice must be > 0');
+    err.code = 'AUCTION_STARTING_PRICE_INVALID';
+    err.status = 400;
+    throw err;
+  }
+  if (reserve != null && reserve < starting) {
+    const err = new Error('reservePrice must be >= startingPrice');
+    err.code = 'AUCTION_RESERVE_INVALID';
+    err.status = 400;
+    throw err;
+  }
+
+  const loc = next.locationSnapshot;
+  const media = next.media;
+  const mediaImagesJson =
+    media && Array.isArray(media.mediaImages)
+      ? JSON.stringify(media.mediaImages)
+      : null;
+
+  const { rows: updated } = await client.query(
+    `UPDATE auctions SET
+      starting_price = $2,
+      current_price = $2,
+      reserve_price = $3,
+      description = COALESCE($4, description),
+      breed = COALESCE($5, breed),
+      gender = COALESCE($6, gender),
+      color = COALESCE($7, color),
+      age_label = COALESCE($8, age_label),
+      location_city = COALESCE($9, location_city),
+      location_district = COALESCE($10, location_district),
+      location_address = COALESCE($11, location_address),
+      location_lat = COALESCE($12, location_lat),
+      location_lng = COALESCE($13, location_lng),
+      media_video_cloudflare_id = COALESCE($14, media_video_cloudflare_id),
+      media_video_hls_url = COALESCE($15, media_video_hls_url),
+      media_video_thumbnail_url = COALESCE($16, media_video_thumbnail_url),
+      media_images = COALESCE($17::jsonb, media_images),
+      updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      id,
+      starting,
+      reserve,
+      next.description !== undefined ? next.description : null,
+      next.breed !== undefined ? next.breed : null,
+      next.gender !== undefined ? next.gender : null,
+      next.color !== undefined ? next.color : null,
+      next.ageLabel !== undefined ? next.ageLabel : null,
+      loc?.city || null,
+      loc?.district || null,
+      loc?.address || null,
+      loc?.lat != null ? Number(loc.lat) : null,
+      loc?.lng != null ? Number(loc.lng) : null,
+      media?.mediaVideoCloudflareId || null,
+      media?.mediaVideoHlsUrl || null,
+      media?.mediaVideoThumbnailUrl || null,
+      mediaImagesJson,
+    ],
+  );
+
+  if (next.title) {
+    await client.query(`UPDATE auction_lots SET title = $2 WHERE id = $1`, [
+      row.lot_id,
+      String(next.title).trim(),
+    ]);
+  }
+
+  await appendEvent(client, {
+    auctionId: id,
+    eventType: 'haraj.seller.draft_updated',
+    payload: { fields: Object.keys(patch || {}) },
+    actorUserId: actor,
+  });
+
+  const mapped = mapAuctionRow({
+    ...updated[0],
+    listing_id: row.listing_id,
+    video_id: row.video_id,
+    lot_title: next.title || row.lot_title,
+  });
+  mapped.lotTitle = next.title || row.lot_title || mapped.lotTitle;
+  return mapped;
+}
+
 module.exports = {
   mapAuctionRow,
   appendEvent,
   upsertLot,
   createAuctionDraft,
+  updateSellerDraft,
   transitionAuction,
   goLiveIfDue,
   closeAuctionAtomic,
