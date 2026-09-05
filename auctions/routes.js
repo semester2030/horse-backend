@@ -20,6 +20,7 @@ const {
 const harajG10 = require('./services/haraj_bidder_security');
 const harajInspection = require('./services/haraj_inspection');
 const harajAfterMarket = require('./services/haraj_after_market');
+const harajHistory = require('./services/haraj_history_analytics');
 const opsNotify = require('../ops_notify');
 const {
   registerHost,
@@ -414,6 +415,81 @@ function registerAuctionRoutes(app, ctx) {
     if (isHarajAuctioneer(req.authUser, req.authUserId)) return 'auctioneer';
     return 'user';
   }
+
+  function historyActorRole(req) {
+    if (isHarajAuctioneer(req.authUser, req.authUserId)) return 'auctioneer';
+    return 'user';
+  }
+
+  router.get('/haraj/history', auth, requireSessionUser, async (req, res) => {
+    try {
+      const role = historyActorRole(req);
+      const result = await withTransaction((client) =>
+        harajHistory.loadHistoryList(client, {
+          species: req.query.species,
+          status: req.query.status,
+          from: req.query.from,
+          to: req.query.to,
+          afterHarajMode: req.query.afterHarajMode,
+          inspectionOutcome: req.query.inspectionOutcome,
+          roomSessionId: req.query.roomSessionId,
+          sessionId: req.query.sessionId,
+          limit: req.query.limit,
+        }, {
+          role: role === 'auctioneer' ? 'auctioneer' : 'user',
+          actorUserId: req.authUserId,
+        }),
+      );
+      if (req.query.format === 'csv') {
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        return res.send(harajHistory.toCsv(result.items));
+      }
+      res.json({ history: result, ai: harajHistory.AI_STATUS });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.get('/haraj/analytics', auth, requireSessionUser, async (req, res) => {
+    try {
+      if (historyActorRole(req) === 'auctioneer') {
+        return res.status(403).json({
+          message: 'Auctioneer cannot read seller/admin analytics',
+          code: 'ANALYTICS_FORBIDDEN',
+        });
+      }
+      const analytics = await withTransaction((client) =>
+        harajHistory.getAnalytics(client, {
+          species: req.query.species,
+          status: req.query.status,
+          from: req.query.from,
+          to: req.query.to,
+          afterHarajMode: req.query.afterHarajMode,
+          inspectionOutcome: req.query.inspectionOutcome,
+          roomSessionId: req.query.roomSessionId,
+          sessionId: req.query.sessionId,
+        }, { role: 'seller', actorUserId: req.authUserId }),
+      );
+      res.json({ analytics, ai: harajHistory.AI_STATUS });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.get('/:id/haraj-history', auth, requireSessionUser, async (req, res) => {
+    try {
+      const record = await withTransaction((client) =>
+        harajHistory.getRecord(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          actorRole: historyActorRole(req),
+        }),
+      );
+      res.json({ history: record, ai: harajHistory.AI_STATUS });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
 
   router.get('/haraj/after-market', async (req, res) => {
     try {
@@ -2662,6 +2738,84 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
           entityId: req.params.auctionId,
         });
         res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/history',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const result = await withTransaction((client) =>
+          harajHistory.loadHistoryList(client, {
+            species: req.query.species,
+            status: req.query.status,
+            from: req.query.from,
+            to: req.query.to,
+            afterHarajMode: req.query.afterHarajMode,
+            inspectionOutcome: req.query.inspectionOutcome,
+            ownerUserId: req.query.ownerUserId || req.query.seller,
+            roomSessionId: req.query.roomSessionId,
+            sessionId: req.query.sessionId,
+            limit: req.query.limit,
+          }, { role: 'admin', actorUserId: harajActor(req) }),
+        );
+        if (req.query.format === 'csv') {
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', 'attachment; filename="haraj-history.csv"');
+          return res.send(harajHistory.toCsv(result.items));
+        }
+        res.json({ history: result, ai: harajHistory.AI_STATUS });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/analytics',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const analytics = await withTransaction((client) =>
+          harajHistory.getAnalytics(client, {
+            species: req.query.species,
+            status: req.query.status,
+            from: req.query.from,
+            to: req.query.to,
+            afterHarajMode: req.query.afterHarajMode,
+            inspectionOutcome: req.query.inspectionOutcome,
+            ownerUserId: req.query.ownerUserId || req.query.seller,
+            roomSessionId: req.query.roomSessionId,
+            sessionId: req.query.sessionId,
+          }, { role: 'admin', actorUserId: harajActor(req) }),
+        );
+        res.json({ analytics, ai: harajHistory.AI_STATUS });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/history/:id',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const record = await withTransaction((client) =>
+          harajHistory.getRecord(client, {
+            auctionId: req.params.id,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+          }),
+        );
+        res.json({ history: record, ai: harajHistory.AI_STATUS });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
