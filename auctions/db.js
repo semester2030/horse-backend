@@ -170,14 +170,34 @@ async function runMigrations() {
 }
 
 async function withTransaction(fn) {
+  const obs = require('./services/haraj_observability');
+  try {
+    obs.applyInject(null, 'db');
+  } catch (err) {
+    obs.recordDbError();
+    throw err;
+  }
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);
+    obs.applyInject(null, 'before_commit');
     await client.query('COMMIT');
     return result;
   } catch (err) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* rollback best-effort */
+    }
+    const status = Number(err?.status || 500);
+    const code = String(err?.code || '');
+    if (status >= 500 || code === 'G17_INJECTED_ROLLBACK' || code === '40P01' || code === '55P03') {
+      obs.recordRollback();
+    }
+    if (code === 'G17_INJECTED_DB' || code.startsWith('08') || code === 'ECONNREFUSED') {
+      obs.recordDbError();
+    }
     throw err;
   } finally {
     client.release();

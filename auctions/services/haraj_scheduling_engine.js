@@ -798,7 +798,8 @@ async function runScheduler(client, { store, actorUserId = 'system-scheduler', c
     `SELECT pg_try_advisory_xact_lock(hashtext($1)) AS ok`,
     ['haraj:g6:scheduler'],
   );
-  if (!lock[0]?.ok) return { skipped: true, reason: 'lock_held', results: [] };
+  const jobRunId = `sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!lock[0]?.ok) return { skipped: true, reason: 'lock_held', results: [], jobRunId };
 
   const policies = await client.query(
     `${POLICY_SELECT}
@@ -830,7 +831,7 @@ async function runScheduler(client, { store, actorUserId = 'system-scheduler', c
       },
     });
   }
-  return { skipped: false, results };
+  return { skipped: false, results, jobRunId };
 }
 
 async function createOverride(client, { body, actorUserId, store }) {
@@ -1041,9 +1042,21 @@ function startHarajScheduler({ store, clock = systemClock } = {}) {
   let stopped = false;
   const tick = () => {
     if (stopped) return;
-    withTransaction((client) => runScheduler(client, { store, clock, actorUserId: 'system-scheduler' })).catch((err) => {
-      console.error('[haraj:scheduler] tick failed:', err.message);
-    });
+    withTransaction((client) => runScheduler(client, { store, clock, actorUserId: 'system-scheduler' }))
+      .then((result) => {
+        try { require('./haraj_observability').observeScheduler(result); } catch { /* obs must not break scheduler */ }
+      })
+      .catch((err) => {
+        try {
+          const obs = require('./haraj_observability');
+          obs.recordSchedulerFailure();
+          obs.logStructured('error', 'scheduler.tick_failed', {
+            taxonomy: 'INTERNAL_ERROR',
+            code: err.code || null,
+          });
+        } catch { /* keep prior console */ }
+        console.error('[haraj:scheduler] tick failed:', err.message);
+      });
   };
   const delay = setTimeout(tick, 15000);
   const timer = setInterval(tick, intervalMs);

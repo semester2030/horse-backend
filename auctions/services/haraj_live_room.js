@@ -34,18 +34,30 @@ const LIVEKIT = {
 };
 
 function observe(action, snapshot, extra = {}) {
-  console.log(JSON.stringify({
-    ev: 'haraj.g9',
-    action,
-    roomId: snapshot.roomId || extra.roomId || null,
-    roomSessionId: snapshot.roomSessionId || extra.roomSessionId || null,
-    sessionId: snapshot.sessionId || extra.sessionId || null,
-    auctionId: snapshot.activeLotId || extra.auctionId || null,
-    auctioneerId: snapshot.auctioneerUserId || extra.auctioneerId || null,
-    status: snapshot.status || extra.status || null,
-    correlationId: extra.correlationId || extra.requestId || null,
-    serverTimestamp: new Date().toISOString(),
-  }));
+  try {
+    const obs = require('./haraj_observability');
+    if (action === 'ready' || action === 'start') obs.observeWs('join', {
+      roomId: snapshot.roomId || extra.roomId || null,
+      roomSessionId: snapshot.roomSessionId || extra.roomSessionId || null,
+      sessionId: snapshot.sessionId || extra.sessionId || null,
+      auctionId: snapshot.activeLotId || extra.auctionId || null,
+    });
+    obs.logStructured('info', 'haraj.room', {
+      action,
+      roomId: snapshot.roomId || extra.roomId || null,
+      roomSessionId: snapshot.roomSessionId || extra.roomSessionId || null,
+      sessionId: snapshot.sessionId || extra.sessionId || null,
+      auctionId: snapshot.activeLotId || extra.auctionId || null,
+      requestId: extra.correlationId || extra.requestId || null,
+    });
+  } catch {
+    console.log(JSON.stringify({
+      ev: 'haraj.g9',
+      action,
+      roomId: snapshot.roomId || extra.roomId || null,
+      roomSessionId: snapshot.roomSessionId || extra.roomSessionId || null,
+    }));
+  }
 }
 
 function fail(status, code, message) {

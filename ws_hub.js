@@ -207,6 +207,11 @@ function createWsHub(options = {}) {
     client.rooms.add(r);
     if (!rooms.has(r)) rooms.set(r, new Set());
     rooms.get(r).add(client);
+    if (r.startsWith('auction:') || r.startsWith('room:')) {
+      try {
+        require('./auctions/services/haraj_observability').observeWs('join', { room: r });
+      } catch { /* obs must not break ws */ }
+    }
   }
 
   /** Unique authenticated userIds in room (multi-device = 1). Ephemeral only. */
@@ -387,6 +392,9 @@ function createWsHub(options = {}) {
         curSeq = await auctionCrossInstance.currentSeq(auctionId);
       }
       if (resume) {
+        try {
+          require('./auctions/services/haraj_observability').observeWs('reconnect', { room });
+        } catch { /* obs must not break ws */ }
         safeSend(client, {
           type: 'resume.ack',
           room,
@@ -517,6 +525,11 @@ function createWsHub(options = {}) {
       (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const user = resolveUserFromToken(token);
     if (!user || !user.id) {
+      try {
+        require('./auctions/services/haraj_observability').logStructured('info', 'ws.auth_failure', {
+          taxonomy: 'AUTHENTICATION',
+        });
+      } catch { /* obs must not break ws */ }
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -554,6 +567,11 @@ function createWsHub(options = {}) {
       },
     };
     clients.add(client);
+    try {
+      require('./auctions/services/haraj_observability').observeWs('connect', {
+        connectionId: client.connectionId,
+      });
+    } catch { /* obs must not break ws */ }
     joinRoom(client, `customer:${client.userId}`);
     joinRoom(client, `provider:${client.userId}`);
     startHeartbeat(client, socket);
@@ -605,7 +623,14 @@ function createWsHub(options = {}) {
         }
       }
     });
-    socket.on('close', () => leaveAll(client));
+    socket.on('close', () => {
+      try {
+        require('./auctions/services/haraj_observability').observeWs('disconnect', {
+          connectionId: client.connectionId,
+        });
+      } catch { /* obs must not break ws */ }
+      leaveAll(client);
+    });
     socket.on('error', () => leaveAll(client));
 
     safeSend(client, {

@@ -83,7 +83,15 @@ async function getOverview(client) {
          COUNT(*) FILTER (WHERE eligibility_status = 'suspended')::int AS suspended_bidders,
          COUNT(*) FILTER (WHERE eligibility_status IN ('pending','not_verified'))::int AS pending_bidders
        FROM haraj_bidder_profiles`,
-    ).catch(() => ({ rows: [{ suspended_bidders: 0, pending_bidders: 0 }] })),
+    ).catch((err) => {
+      try {
+        require('./haraj_observability').logStructured('error', 'command_center.bidders_degraded', {
+          taxonomy: 'DATABASE_FAILURE',
+          code: err.code || null,
+        });
+      } catch { /* obs must not break overview */ }
+      return { rows: [{ suspended_bidders: 0, pending_bidders: 0 }] };
+    }),
     harajHistory.getAnalytics(client, {}, { role: 'admin', actorUserId: 'command-center' }),
   ]);
 

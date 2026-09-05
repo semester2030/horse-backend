@@ -135,7 +135,18 @@ function registerAuctionRoutes(app, ctx) {
   const audio = createAuctionAudioProvider();
   const realtimeMode = 'WS_PHASE3_REST_AUTHORITY';
 
+  const harajObs = require('./services/haraj_observability');
   router.use(auctionsFeatureGate);
+
+  router.get('/ready', (req, res) => {
+    const readiness = harajObs.getReadiness({
+      auctionsReady: ENABLE_AUCTIONS && isDbConfigured() && areMigrationsReady(),
+      dbConfigured: isDbConfigured(),
+      schemaVersion: getSchemaVersion(),
+      migrationsReady: areMigrationsReady(),
+    });
+    res.status(readiness.ready ? 200 : 503).json({ ...readiness, requestId: req.correlationId });
+  });
 
   router.get('/status', (req, res) => {
     res.json({
@@ -151,6 +162,8 @@ function registerAuctionRoutes(app, ctx) {
       settlementNote: SETTLEMENT_NOTE,
       v1Species: ['horse', 'camel', 'falcon'],
       realtimeMode: realtimeMode,
+      requestId: req.correlationId,
+      version: harajObs.deployedVersion(),
     });
   });
 
@@ -352,7 +365,18 @@ function registerAuctionRoutes(app, ctx) {
         }
         return out;
       });
-      dispatchInspectionNotifications(result.notifications);
+      try {
+        harajObs.applyInject(req, 'notify');
+        dispatchInspectionNotifications(result.notifications);
+      } catch (notifyErr) {
+        harajObs.logStructured('error', 'notify.failed_after_commit', {
+          requestId: req.correlationId,
+          auctionId: req.params.id,
+          taxonomy: 'DEPENDENCY_FAILURE',
+          code: notifyErr.code || null,
+          businessCommitted: true,
+        });
+      }
       res.json({
         inspection: result.case,
         replay: result.replay,
@@ -655,9 +679,12 @@ function registerAuctionRoutes(app, ctx) {
         }),
       );
       dispatchAfterHarajNotifications(result.notifications);
-      res.json({ afterHaraj: result.view, replay: result.replay, settlementImplemented: false });
+      res.json({ afterHaraj: result.view, replay: result.replay, settlementImplemented: false, requestId: req.correlationId });
     } catch (err) {
-      res.status(err.status || 500).json({ message: err.message, code: err.code });
+      if (err.code === 'AFTER_HARAJ_STALE_STATE' || err.status === 409) {
+        try { harajObs.recordAfterHarajConflict(); } catch { /* obs */ }
+      }
+      res.status(err.status || 500).json(harajObs.safeErrorBody(err, req));
     }
   });
 
@@ -950,6 +977,7 @@ function registerAuctionRoutes(app, ctx) {
 
   router.post('/', auth, requireSessionUser, async (req, res) => {
     try {
+      harajObs.applyInject(req, 'media');
       const rawBody = req.body || {};
       const haraj = isHarajChannel(rawBody);
       const spoof = assertNoOwnershipSpoof(rawBody, req.authUserId, {
@@ -1362,6 +1390,7 @@ function registerAuctionRoutes(app, ctx) {
 
   router.post('/:id/bids', auth, requireSessionUser, async (req, res) => {
     try {
+      harajObs.applyInject(req, 'handler');
       const idempotencyKey =
         req.headers['idempotency-key'] || req.body?.idempotencyKey;
       const result = await withTransaction((client) =>
@@ -1372,9 +1401,15 @@ function registerAuctionRoutes(app, ctx) {
           idempotencyKey,
           expectedVersion: req.body?.expectedVersion,
           clientBody: req.body,
-          correlationId: req.get('x-request-id') || idempotencyKey,
+          correlationId: req.correlationId || idempotencyKey,
         }),
       );
+      harajObs.observeBidOutcome({
+        replay: result.replay,
+        accepted: !result.replay,
+        businessRejected: false,
+        code: result.replay ? 'BID_IDEMPOTENT_REPLAY' : 'BID_ACCEPTED',
+      });
       if (auctionRealtime && result.auction && !result.replay) {
         let metrics = {};
         try {
@@ -1382,21 +1417,31 @@ function registerAuctionRoutes(app, ctx) {
           const bids = await getBidAggregates(pool, result.auction.id);
           const extensionsCount = await getExtensionsCount(pool, result.auction.id);
           metrics = { ...bids, extensionsCount };
-        } catch (_) {
-          /* delivery still includes price/endAt from auction row */
+        } catch (pubErr) {
+          harajObs.logStructured('error', 'auction.bid.metrics_degraded', {
+            requestId: req.correlationId,
+            auctionId: result.auction.id,
+            taxonomy: 'DEPENDENCY_FAILURE',
+            code: pubErr.code || null,
+          });
         }
         auctionRealtime.publishBidAccepted(result.auction, result.bid, {
           wasExtended: result.wasExtended,
           metrics,
         });
       }
-      res.status(result.replay ? 200 : 201).json(result);
+      res.status(result.replay ? 200 : 201).json({ ...result, requestId: req.correlationId });
     } catch (err) {
-      res.status(err.status || 500).json({
-        message: err.message,
+      const status = err.status || 500;
+      const taxonomy = harajObs.classify(err, status);
+      harajObs.observeBidOutcome({
+        replay: false,
+        accepted: false,
+        businessRejected: taxonomy === 'BUSINESS_REJECTION' || taxonomy === 'CONFLICT' || taxonomy === 'AUTHORIZATION',
         code: err.code,
-        details: err.details,
       });
+      res.locals.errorCode = err.code;
+      res.status(status).json(harajObs.safeErrorBody(err, req));
     }
   });
 
@@ -2024,6 +2069,7 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
             horizonDays: req.body?.horizonDays,
           }),
         );
+        try { require('./services/haraj_observability').observeScheduler(result); } catch { /* obs */ }
         res.json({
           ...result,
           schedulerAuthority: 'backend',
@@ -2843,7 +2889,11 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
         });
         res.json(result);
       } catch (err) {
-        res.status(err.status || 500).json({ message: err.message, code: err.code });
+        if (err.code === 'CASE_STALE_STATE' || err.status === 409) {
+          try { require('./services/haraj_observability').recordCaseConflict(); } catch { /* obs */ }
+        }
+        const harajObs = require('./services/haraj_observability');
+        res.status(err.status || 500).json(harajObs.safeErrorBody(err, req));
       }
     },
   );
@@ -2871,9 +2921,147 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     async (req, res) => {
       try {
         const overview = await withTransaction((client) => harajCommandCenter.getOverview(client));
-        res.json({ overview, ai: harajCommandCenter.AI_STATUS, adminIsNotAuthority: true });
+        const harajObs = require('./services/haraj_observability');
+        res.json({
+          overview: {
+            ...overview,
+            opsHealth: {
+              ...harajObs.getReadiness({
+                auctionsReady: ENABLE_AUCTIONS && isDbConfigured() && areMigrationsReady(),
+                dbConfigured: isDbConfigured(),
+                schemaVersion: getSchemaVersion(),
+                migrationsReady: areMigrationsReady(),
+              }),
+              metrics: harajObs.snapshot().metrics,
+              status: harajObs.getReadiness({
+                auctionsReady: ENABLE_AUCTIONS && isDbConfigured() && areMigrationsReady(),
+                dbConfigured: isDbConfigured(),
+                schemaVersion: getSchemaVersion(),
+                migrationsReady: areMigrationsReady(),
+              }).ready ? 'HEALTHY' : 'UNAVAILABLE',
+            },
+          },
+          ai: harajCommandCenter.AI_STATUS,
+          adminIsNotAuthority: true,
+        });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/ops-health',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      const harajObs = require('./services/haraj_observability');
+      const readiness = harajObs.getReadiness({
+        auctionsReady: ENABLE_AUCTIONS && isDbConfigured() && areMigrationsReady(),
+        dbConfigured: isDbConfigured(),
+        schemaVersion: getSchemaVersion(),
+        migrationsReady: areMigrationsReady(),
+      });
+      let invariants = null;
+      try {
+        invariants = await withTransaction((client) => harajObs.runInvariants(client));
+      } catch (err) {
+        harajObs.logStructured('error', 'ops.invariants_failed', {
+          requestId: req.correlationId,
+          code: err.code || null,
+        });
+      }
+      res.json({
+        readiness,
+        snapshot: harajObs.snapshot(),
+        invariants,
+        requestId: req.correlationId,
+        adminIsNotAuthority: true,
+        secretsOmitted: true,
+      });
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/ops-logs',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    (req, res) => {
+      const harajObs = require('./services/haraj_observability');
+      res.json({ logs: harajObs.recentLogs(), requestId: req.correlationId });
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/ops/inject',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    (req, res) => {
+      try {
+        rejectClientActor(req);
+        const harajObs = require('./services/haraj_observability');
+        const result = harajObs.setRuntimeInject(req.body?.mode || null, {
+          roomId: req.body?.roomId,
+          actor: 'admin',
+        });
+        res.json({ inject: result, requestId: req.correlationId });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code, requestId: req.correlationId });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/ops/probe',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const harajObs = require('./services/haraj_observability');
+        const auctionId = req.body?.auctionId;
+        const readOnly = Boolean(req.body?.readOnly);
+        let beforeUpdatedAt = null;
+        const count = await withTransaction(async (client) => {
+          if (auctionId) {
+            const { rows } = await client.query('SELECT updated_at FROM auctions WHERE id = $1', [auctionId]);
+            beforeUpdatedAt = rows[0]?.updated_at || null;
+            if (rows[0] && !readOnly) {
+              await client.query('UPDATE auctions SET updated_at = NOW() WHERE id = $1', [auctionId]);
+            }
+          }
+          const { rows } = await client.query('SELECT COUNT(*)::int AS c FROM auctions');
+          return rows[0].c;
+        });
+        harajObs.logStructured('info', 'g17.probe', {
+          requestId: req.correlationId,
+          auctionId: auctionId || null,
+          phase: req.body?.phase || 'handler',
+          note: req.body?.note || null,
+        });
+        try {
+          harajObs.applyInject(req, req.body?.phase || 'handler');
+        } catch (err) {
+          return res.status(err.status || 500).json({
+            ...harajObs.safeErrorBody(err, req),
+            auctionsCount: count,
+            beforeUpdatedAt,
+            businessTruthUnchanged: true,
+            phase: req.body?.phase || 'handler',
+          });
+        }
+        res.json({
+          ok: true,
+          auctionsCount: count,
+          beforeUpdatedAt,
+          requestId: req.correlationId,
+        });
+      } catch (err) {
+        const harajObs = require('./services/haraj_observability');
+        res.status(err.status || 500).json({
+          ...harajObs.safeErrorBody(err, req),
+          businessTruthUnchanged: err.code === 'G17_INJECTED_ROLLBACK',
+        });
       }
     },
   );

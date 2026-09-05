@@ -605,6 +605,15 @@ app.use(
 );
 app.use(express.json());
 
+const harajObs = require('./auctions/services/haraj_observability');
+try {
+  harajObs.assertProductionInjectForbidden();
+} catch (e) {
+  console.error(JSON.stringify({ event: 'g17.inject.boot_forbidden', code: e.code, message: e.message }));
+  throw e;
+}
+app.use(harajObs.observabilityMiddleware);
+
 // مقاييس زمن استجابة API
 app.use((req, res, next) => {
   const start = Date.now();
@@ -643,11 +652,19 @@ if (fs.existsSync(adminConsoleDir)) {
   });
 }
 
-// تسجيل كل طلب وارد (للتشخيص: هل الطلب يصل من الآيفون؟)
-app.use((req, res, next) => {
-  const clientIp = req.ip || req.connection?.remoteAddress || '?';
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} من ${clientIp}`);
-  next();
+app.get('/ready', (req, res) => {
+  const auctions = getAuctionsPublicStatus();
+  const readiness = harajObs.getReadiness({
+    auctionsReady: auctions.ready,
+    dbConfigured: auctions.dbConfigured,
+    schemaVersion: auctions.schemaVersion,
+    migrationsReady: auctions.migrationsReady,
+  });
+  res.status(readiness.ready ? 200 : 503).json({
+    ...readiness,
+    requestId: req.correlationId,
+    auctions,
+  });
 });
 
 // ========== Swagger API Docs (مثل الصور التي أرسلتها) ==========
@@ -709,6 +726,15 @@ app.get('/health', (req, res) => {
     payload.otpDev = otpDev.status();
     payload.smsDetail = smsOtp.status();
   }
+  payload.liveness = true;
+  payload.readiness = harajObs.getReadiness({
+    auctionsReady: payload.auctions?.ready,
+    dbConfigured: payload.auctions?.dbConfigured,
+    schemaVersion: payload.auctions?.schemaVersion,
+    migrationsReady: payload.auctions?.migrationsReady,
+  });
+  payload.version = harajObs.deployedVersion();
+  payload.requestId = req.correlationId;
   res.json(payload);
 });
 
@@ -3965,6 +3991,17 @@ app.get('/media/stream/:videoId', auth, async (req, res) => {
     console.error('[media/stream/:videoId]', e.message);
     return res.status(502).json({ message: e.message || 'فشل جلب الفيديو' });
   }
+});
+
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  harajObs.logStructured('error', 'http.unhandled', {
+    requestId: req.correlationId,
+    taxonomy: harajObs.classify(err, err.status || 500),
+    code: err.code || null,
+  });
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json(harajObs.safeErrorBody(err, req));
 });
 
 // ========== تشغيل الخادم ==========
