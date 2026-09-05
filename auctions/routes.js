@@ -22,6 +22,7 @@ const harajInspection = require('./services/haraj_inspection');
 const harajAfterMarket = require('./services/haraj_after_market');
 const harajHistory = require('./services/haraj_history_analytics');
 const harajCommandCenter = require('./services/haraj_admin_command_center');
+const harajRisk = require('./services/haraj_risk_disputes');
 const opsNotify = require('../ops_notify');
 const {
   registerHost,
@@ -330,8 +331,8 @@ function registerAuctionRoutes(app, ctx) {
           code: 'INSPECTION_CLIENT_AUTHORITY_FORBIDDEN',
         });
       }
-      const result = await withTransaction((client) =>
-        harajInspection.submitBuyerDecision(client, {
+      const result = await withTransaction(async (client) => {
+        const out = await harajInspection.submitBuyerDecision(client, {
           auctionId: req.params.id,
           actorUserId: req.authUserId,
           outcome: req.body?.outcome,
@@ -340,13 +341,23 @@ function registerAuctionRoutes(app, ctx) {
           evidence: req.body?.evidence,
           expectedUpdatedAt: req.body?.expectedUpdatedAt,
           idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
-        }),
-      );
+        });
+        if (out.case?.awardStatus === 'withdrawn') {
+          out.g16 = await harajRisk.escalateWithdrawal(client, {
+            auctionId: req.params.id,
+            actorUserId: req.authUserId,
+            buyerUserId: out.case.winnerUserId,
+            awardId: out.case.awardId,
+          });
+        }
+        return out;
+      });
       dispatchInspectionNotifications(result.notifications);
       res.json({
         inspection: result.case,
         replay: result.replay,
         settlementImplemented: false,
+        g16: result.g16 || null,
       });
     } catch (err) {
       res.status(err.status || 500).json({ message: err.message, code: err.code });
@@ -472,6 +483,20 @@ function registerAuctionRoutes(app, ctx) {
         }, { role: 'seller', actorUserId: req.authUserId }),
       );
       res.json({ analytics, ai: harajHistory.AI_STATUS });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.get('/haraj/cases/:id', auth, requireSessionUser, async (req, res) => {
+    try {
+      const detail = await withTransaction((client) => harajRisk.getCase(client, req.params.id));
+      const reporter = detail.case?.reporterUserId;
+      const isReporter = String(reporter) === String(req.authUserId);
+      if (!isReporter) {
+        return res.status(403).json({ message: 'Not authorized for this case', code: 'CASE_FORBIDDEN' });
+      }
+      res.json(harajRisk.publicCaseView(detail));
     } catch (err) {
       res.status(err.status || 500).json({ message: err.message, code: err.code });
     }
@@ -2669,8 +2694,8 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     async (req, res) => {
       try {
         rejectClientActor(req);
-        const result = await withTransaction((client) =>
-          harajInspection.resolveMismatch(client, {
+        const result = await withTransaction(async (client) => {
+          const out = await harajInspection.resolveMismatch(client, {
             auctionId: req.params.auctionId,
             actorUserId: harajActor(req),
             actorRole: 'admin',
@@ -2678,15 +2703,29 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
             note: req.body?.note,
             expectedUpdatedAt: req.body?.expectedUpdatedAt,
             idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
-          }),
-        );
+          });
+          if (req.body?.resolution === 'confirm_mismatch') {
+            out.g16 = await harajRisk.escalateMismatch(client, {
+              auctionId: req.params.auctionId,
+              actorUserId: harajActor(req),
+              inspectionId: out.case?.inspectionId,
+              awardId: out.case?.awardId,
+            });
+          }
+          return out;
+        });
         logAudit(ctx, {
           actorId: harajActor(req),
           action: `haraj.inspection.resolve.${req.body?.resolution || 'unknown'}`,
           entityType: 'haraj_inspection',
           entityId: req.params.auctionId,
         });
-        res.json({ inspection: result.case, replay: result.replay, settlementImplemented: false });
+        res.json({
+          inspection: result.case,
+          replay: result.replay,
+          settlementImplemented: false,
+          g16: result.g16 || null,
+        });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
@@ -2739,6 +2778,86 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
           entityId: req.params.auctionId,
         });
         res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/cases',
+    requireAdminAuth,
+    requirePerm('auctions:disputes'),
+    async (req, res) => {
+      try {
+        const cases = await withTransaction((client) =>
+          harajRisk.listCases(client, {
+            status: req.query.status,
+            category: req.query.category,
+            limit: req.query.limit,
+          }),
+        );
+        res.json({ cases, ai: harajRisk.AI_STATUS, signalIsNotGuilt: true });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/cases/:id',
+    requireAdminAuth,
+    requirePerm('auctions:disputes'),
+    async (req, res) => {
+      try {
+        const detail = await withTransaction((client) => harajRisk.getCase(client, req.params.id));
+        res.json({ ...detail, adminIsNotAuthority: true });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/cases/:id/resolve',
+    requireAdminAuth,
+    requirePerm('auctions:disputes'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const result = await withTransaction((client) =>
+          harajRisk.resolveCase(client, {
+            caseId: req.params.id,
+            adminId: harajActor(req),
+            resolution: req.body?.resolution,
+            note: req.body?.note || req.body?.reason,
+            expectedUpdatedAt: req.body?.expectedUpdatedAt,
+            subjectUserId: req.body?.subjectUserId,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: `haraj.case.resolve.${req.body?.resolution || 'unknown'}`,
+          entityType: 'auction_dispute',
+          entityId: req.params.id,
+        });
+        res.json(result);
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/risk/evaluate/:auctionId',
+    requireAdminAuth,
+    requirePerm('auctions:disputes'),
+    async (req, res) => {
+      try {
+        const result = await withTransaction((client) =>
+          harajRisk.evaluateDeterministic(client, req.params.auctionId),
+        );
+        res.json(result);
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
