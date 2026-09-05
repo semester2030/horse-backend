@@ -185,7 +185,7 @@ function createRoomSequencer(replayWindow) {
 
 function isSequencedRoom(room) {
   const r = String(room);
-  return r.startsWith('request:') || r.startsWith('auction:');
+  return r.startsWith('request:') || r.startsWith('auction:') || r.startsWith('haraj-room:');
 }
 
 function createWsHub(options = {}) {
@@ -334,6 +334,19 @@ function createWsHub(options = {}) {
       return await auctionCrossInstance.append(event);
     }
     return publishAuction(event);
+  }
+
+  function publishHarajRoom(event) {
+    const roomSessionId = event.roomSessionId;
+    if (!roomSessionId) return event;
+    const room = `haraj-room:${roomSessionId}`;
+    const sequenced = sequencer.assignAndStore(room, {
+      ...event,
+      room,
+      serverTimestamp: event.serverTimestamp || new Date().toISOString(),
+    });
+    publish(room, sequenced);
+    return sequenced;
   }
 
   function handleSequencedSubscribe(client, room, data, { resume = false } = {}) {
@@ -612,6 +625,7 @@ function createWsHub(options = {}) {
     publishNegotiation,
     publishAuction,
     publishAuctionAsync,
+    publishHarajRoom,
     publishAuctionPresence,
     setAuctionCrossInstance,
     replayAfter: sequencer.replayAfter,

@@ -477,4 +477,5 @@ module.exports = {
   assertLotLifecycle,
   queueMembershipByAuction,
   lockRoomSession,
+  lockLot,
 };

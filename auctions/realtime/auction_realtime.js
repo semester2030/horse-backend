@@ -150,6 +150,11 @@ function createAuctionRealtime({ wsHub, getPool }) {
     return out.filter(Boolean);
   }
 
+  function publishHarajRoom(event) {
+    if (!wsHub || typeof wsHub.publishHarajRoom !== 'function') return null;
+    return wsHub.publishHarajRoom(event);
+  }
+
   return {
     canSubscribe,
     publish,
@@ -157,6 +162,7 @@ function createAuctionRealtime({ wsHub, getPool }) {
     publishPresence,
     publishTransition,
     publishClosed,
+    publishHarajRoom,
     sanitizeBidderLabel,
   };
 }

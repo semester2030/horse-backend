@@ -200,6 +200,68 @@ function registerAuctionRoutes(app, ctx) {
     }
   });
 
+  const harajLive = require('./services/haraj_live_room');
+
+  async function runHarajLive(req, res, fn, eventType) {
+    try {
+      const snapshot = await withTransaction((client) =>
+        fn(client, {
+          roomSessionId: req.params.roomSessionId,
+          auctionId: req.params.auctionId || req.body?.auctionId || req.body?.lotId,
+          reason: req.body?.reason,
+          actorUserId: req.authUserId,
+          admin: false,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      if (auctionRealtime) harajLive.publishIfPossible(auctionRealtime, snapshot, eventType);
+      res.json({ snapshot, livekit: snapshot.livekit });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  }
+
+  router.get('/haraj/rooms/:roomSessionId', auth, requireSessionUser, async (req, res) => {
+    try {
+      const snapshot = await withTransaction((client) => harajLive.getSnapshot(client, req.params.roomSessionId));
+      res.json({ snapshot, reconnect: true, subscribe: `haraj-room:${req.params.roomSessionId}` });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+  router.post('/haraj/rooms/:roomSessionId/ready', auth, requireSessionUser, requireHarajAuctioneer, (req, res) =>
+    runHarajLive(req, res, harajLive.readyRoom, 'room.ready'),
+  );
+  router.post('/haraj/rooms/:roomSessionId/start', auth, requireSessionUser, requireHarajAuctioneer, (req, res) =>
+    runHarajLive(req, res, harajLive.startRoom, 'room.live'),
+  );
+  router.post('/haraj/rooms/:roomSessionId/pause', auth, requireSessionUser, requireHarajAuctioneer, (req, res) =>
+    runHarajLive(req, res, harajLive.pauseRoom, 'room.paused'),
+  );
+  router.post('/haraj/rooms/:roomSessionId/resume', auth, requireSessionUser, requireHarajAuctioneer, (req, res) =>
+    runHarajLive(req, res, harajLive.resumeRoom, 'room.resumed'),
+  );
+  router.post('/haraj/rooms/:roomSessionId/advance', auth, requireSessionUser, requireHarajAuctioneer, (req, res) =>
+    runHarajLive(req, res, harajLive.advanceLot, 'lot.completed'),
+  );
+  router.post('/haraj/rooms/:roomSessionId/complete', auth, requireSessionUser, requireHarajAuctioneer, (req, res) =>
+    runHarajLive(req, res, harajLive.completeRoom, 'room.completed'),
+  );
+  router.post(
+    '/haraj/rooms/:roomSessionId/lots/:auctionId/activate',
+    auth,
+    requireSessionUser,
+    requireHarajAuctioneer,
+    (req, res) => runHarajLive(req, res, harajLive.activateLot, 'lot.activated'),
+  );
+  router.post(
+    '/haraj/rooms/:roomSessionId/lots/:auctionId/skip',
+    auth,
+    requireSessionUser,
+    requireHarajAuctioneer,
+    (req, res) => runHarajLive(req, res, harajLive.skipLot, 'lot.skipped'),
+  );
+
   router.get('/haraj/review/:id/history', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
     try {
       const history = await withTransaction(async (client) => {
@@ -1874,6 +1936,72 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
     },
+  );
+
+  const harajLiveAdmin = require('./services/haraj_live_room');
+
+  async function runAdminLive(req, res, fn, eventType) {
+    try {
+      rejectClientActor(req);
+      const snapshot = await withTransaction((client) =>
+        fn(client, {
+          roomSessionId: req.params.id,
+          auctionId: req.params.auctionId || req.body?.auctionId || req.body?.lotId,
+          reason: req.body?.reason,
+          actorUserId: harajActor(req),
+          admin: true,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      if (auctionRealtime) harajLiveAdmin.publishIfPossible(auctionRealtime, snapshot, eventType);
+      res.json({ snapshot, livekit: snapshot.livekit });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  }
+
+  adminRouter.get(
+    '/haraj/room-sessions/:id/live',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const snapshot = await withTransaction((client) => harajLiveAdmin.getSnapshot(client, req.params.id));
+        res.json({ snapshot, reconnect: true });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+  adminRouter.post('/haraj/room-sessions/:id/ready', requireAdminAuth, requirePerm('auctions:ops'), (req, res) =>
+    runAdminLive(req, res, harajLiveAdmin.readyRoom, 'room.ready'),
+  );
+  adminRouter.post('/haraj/room-sessions/:id/start', requireAdminAuth, requirePerm('auctions:ops'), (req, res) =>
+    runAdminLive(req, res, harajLiveAdmin.startRoom, 'room.live'),
+  );
+  adminRouter.post('/haraj/room-sessions/:id/pause', requireAdminAuth, requirePerm('auctions:ops'), (req, res) =>
+    runAdminLive(req, res, harajLiveAdmin.pauseRoom, 'room.paused'),
+  );
+  adminRouter.post('/haraj/room-sessions/:id/resume', requireAdminAuth, requirePerm('auctions:ops'), (req, res) =>
+    runAdminLive(req, res, harajLiveAdmin.resumeRoom, 'room.resumed'),
+  );
+  adminRouter.post('/haraj/room-sessions/:id/advance', requireAdminAuth, requirePerm('auctions:ops'), (req, res) =>
+    runAdminLive(req, res, harajLiveAdmin.advanceLot, 'lot.completed'),
+  );
+  adminRouter.post('/haraj/room-sessions/:id/complete', requireAdminAuth, requirePerm('auctions:ops'), (req, res) =>
+    runAdminLive(req, res, harajLiveAdmin.completeRoom, 'room.completed'),
+  );
+  adminRouter.post(
+    '/haraj/room-sessions/:id/lots/:auctionId/activate',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    (req, res) => runAdminLive(req, res, harajLiveAdmin.activateLot, 'lot.activated'),
+  );
+  adminRouter.post(
+    '/haraj/room-sessions/:id/lots/:auctionId/skip',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    (req, res) => runAdminLive(req, res, harajLiveAdmin.skipLot, 'lot.skipped'),
   );
 
   adminRouter.get(

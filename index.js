@@ -1954,6 +1954,7 @@ const wsHub = createWsHub({
     return roles.migrateLegacyUser({ ...raw });
   },
   canSubscribeRoom(client, room) {
+    if (String(room).startsWith('haraj-room:')) return Boolean(client?.userId);
     if (!String(room).startsWith('auction:')) return true;
     const auctionId = String(room).slice('auction:'.length);
     if (!auctionId) return false;
