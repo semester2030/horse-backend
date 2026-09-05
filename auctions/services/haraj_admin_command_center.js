@@ -39,17 +39,19 @@ const FORBIDDEN = Object.freeze({
 async function getOverview(client) {
   const [sessions, rooms, queue, reviews, inspections, after, bidders, analytics] = await Promise.all([
     client.query(
-      `SELECT id, category_code, status, timezone, scheduled_start_at, scheduled_end_at
-       FROM haraj_sessions
-       WHERE status IN ('planned','upcoming','live','paused')
-       ORDER BY scheduled_start_at ASC
+      `SELECT s.id, c.code AS category_code, s.status, s.timezone, s.scheduled_start_at, s.scheduled_end_at
+       FROM haraj_sessions s
+       JOIN haraj_categories c ON c.id = s.category_id
+       WHERE s.status IN ('planned','upcoming','live','closing')
+       ORDER BY s.scheduled_start_at ASC
        LIMIT 20`,
     ),
     client.query(
       `SELECT rs.id, rs.status, rs.active_lot_id, rs.auctioneer_user_id, rs.haraj_session_id,
-              r.code AS room_code, r.name_ar AS room_name, r.category_code
+              r.code AS room_code, r.name_ar AS room_name, c.code AS category_code
        FROM haraj_room_sessions rs
        JOIN haraj_rooms r ON r.id = rs.room_id
+       JOIN haraj_categories c ON c.id = r.category_id
        WHERE rs.status IN ('pre_live','live','paused')
        ORDER BY rs.updated_at DESC
        LIMIT 20`,
