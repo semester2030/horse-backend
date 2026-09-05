@@ -48,7 +48,7 @@ async function adminLogin(base) {
   return http(base, '/admin/v2/auth/login', { method: 'POST', body: { email, password } });
 }
 
-function lotBody(species, title, { startOffsetMs = -120000, durationMs = 25000 } = {}) {
+function lotBody(species, title, { startOffsetMs = -8000, durationMs = 90000 } = {}) {
   const start = new Date(Date.now() + startOffsetMs);
   return {
     channel: 'haraj',
@@ -195,7 +195,7 @@ async function main() {
     return me.json?.eligibility?.activeExposure;
   }
 
-  async function waitUntilSold(id, sellerCloseTok, timeoutMs = 90000) {
+  async function waitUntilSold(id, sellerCloseTok, timeoutMs = 180000) {
     const started = Date.now();
     let last = null;
     while (Date.now() - started < timeoutMs) {
@@ -217,10 +217,16 @@ async function main() {
     return last;
   }
 
-  const acceptLot = await liveLot('horse', `G11 accept ${stamp}`);
-  const mismatchLot = await liveLot('camel', `G11 mismatch ${stamp}`);
-  const withdrawLot = await liveLot('falcon', `G11 withdraw ${stamp}`);
-  const expireLot = await liveLot('horse', `G11 expire ${stamp}`, 22000);
+  const acceptLot = await liveLot('horse', `G11 accept ${stamp}`, 120000);
+  const bidAcceptA = acceptLot.id ? await bid(aTok, acceptLot.id, 5000, `g11-a-acc-${stamp}`) : { status: 0 };
+  const bidAcceptB = acceptLot.id ? await bid(bTok, acceptLot.id, 4000, `g11-b-acc-${stamp}`) : { status: 0 };
+  const mismatchLot = await liveLot('camel', `G11 mismatch ${stamp}`, 120000);
+  const bidMis = mismatchLot.id ? await bid(cTok, mismatchLot.id, 6000, `g11-c-mis-${stamp}`) : { status: 0 };
+  const withdrawLot = await liveLot('falcon', `G11 withdraw ${stamp}`, 120000);
+  const bidWA = withdrawLot.id ? await bid(aTok, withdrawLot.id, 7000, `g11-a-w-${stamp}`) : { status: 0 };
+  const bidWB = withdrawLot.id ? await bid(bTok, withdrawLot.id, 6500, `g11-b-w-${stamp}`) : { status: 0 };
+  const expireLot = await liveLot('horse', `G11 expire ${stamp}`, 120000);
+  const bidExp = expireLot.id ? await bid(aTok, expireLot.id, 5500, `g11-a-exp-${stamp}`) : { status: 0 };
   record('lots_live_anti_snipe_zero',
     acceptLot.live?.status === 200
     && mismatchLot.live?.status === 200
@@ -234,16 +240,10 @@ async function main() {
     process.exit(1);
   }
 
-  const bidAcceptA = await bid(aTok, acceptLot.id, 5000, `g11-a-acc-${stamp}`);
-  const bidAcceptB = await bid(bTok, acceptLot.id, 4000, `g11-b-acc-${stamp}`);
   record('accept_lot_bids', bidAcceptA.status === 201 && bidAcceptB.status === 201, {
     a: bidAcceptA.status, b: bidAcceptB.status, aCode: bidAcceptA.json?.code,
+    mis: bidMis.status, wA: bidWA.status, wB: bidWB.status, exp: bidExp.status,
   });
-
-  await bid(cTok, mismatchLot.id, 6000, `g11-c-mis-${stamp}`);
-  await bid(aTok, withdrawLot.id, 7000, `g11-a-w-${stamp}`);
-  await bid(bTok, withdrawLot.id, 6500, `g11-b-w-${stamp}`);
-  await bid(aTok, expireLot.id, 5500, `g11-a-exp-${stamp}`);
 
   const expBefore = await exposure(aTok);
   record('g10_exposure_before_end', Number(expBefore) > 0, { expBefore });
@@ -495,8 +495,11 @@ async function main() {
     code: stale.json?.code,
   });
 
-  const raceLot = await liveLot('horse', `G11 race ${stamp}`, 20000);
-  await bid(cTok, raceLot.id, 8000, `g11-c-race-${stamp}`);
+  const raceLot = await liveLot('horse', `G11 race ${stamp}`, 120000);
+  const raceBid = raceLot.id ? await bid(cTok, raceLot.id, 8000, `g11-c-race-${stamp}`) : { status: 0 };
+  if (raceBid.status !== 201) {
+    record('concurrency_bid', false, { status: raceBid.status, code: raceBid.json?.code });
+  }
   const raced = await waitUntilSold(raceLot.id, sellerTok);
   const raceGet = await http(base, `/auctions/${raceLot.id}/inspection`, { token: cTok });
   const expectedRace = raceGet.json?.inspection?.expectedUpdatedAt;
