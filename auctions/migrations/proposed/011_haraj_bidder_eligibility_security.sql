@@ -1,9 +1,11 @@
 -- =============================================================================
--- NOMAS HARAJ — Migration 011 (PROPOSED — NOT EXECUTED — REVIEW REQUIRED)
+-- NOMAS HARAJ — Migration 011 (G10.1 REVIEWED — STAGING APPLY ONLY)
 -- G10 Bidder Eligibility / Bid Security
--- Depends on: 010_haraj_post_close (applied on Staging only)
+-- Depends on: 010_haraj_post_close
 -- DO NOT RUN ON PRODUCTION.
 -- DO NOT place this file in auctions/migrations/ — that directory auto-applies on boot.
+-- Money: NUMERIC(14,2) — same as auctions.current_price / bids.amount. No FLOAT/REAL/DOUBLE.
+-- Exposure snapshots are AUDIT/IDEMPOTENCY only. Authoritative exposure = auctions+bids.
 -- =============================================================================
 -- Bid Security is NOT purchase price, wallet, escrow, stored value, or seller settlement.
 -- Do NOT reuse haraj_settlements (G11+/sale proceeds) for bid participation security.
@@ -15,7 +17,7 @@ CREATE TABLE IF NOT EXISTS haraj_bidder_profiles (
     'not_verified', 'pending', 'verified', 'suspended', 'revoked'
   )),
   bid_limit NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (bid_limit >= 0),
-  currency TEXT NOT NULL DEFAULT 'SAR',
+  currency TEXT NOT NULL DEFAULT 'SAR' CHECK (currency = 'SAR'),
   suspended_reason TEXT,
   revoked_reason TEXT,
   verified_at TIMESTAMPTZ,
@@ -30,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_haraj_bidder_profiles_status
 
 CREATE TABLE IF NOT EXISTS haraj_bid_securities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bidder_user_id TEXT NOT NULL,
+  bidder_user_id TEXT NOT NULL REFERENCES haraj_bidder_profiles(user_id) ON DELETE RESTRICT,
   status TEXT NOT NULL DEFAULT 'required' CHECK (status IN (
     'required', 'pending', 'authorized', 'active', 'released', 'expired', 'failed', 'cancelled'
   )),
@@ -39,10 +41,10 @@ CREATE TABLE IF NOT EXISTS haraj_bid_securities (
   )),
   scope_id TEXT,
   authorized_limit NUMERIC(14, 2) NOT NULL CHECK (authorized_limit > 0),
-  currency TEXT NOT NULL DEFAULT 'SAR',
+  currency TEXT NOT NULL DEFAULT 'SAR' CHECK (currency = 'SAR'),
   provider TEXT NOT NULL DEFAULT 'staging_test',
   provider_mode TEXT NOT NULL DEFAULT 'test_sandbox' CHECK (provider_mode IN (
-    'test_sandbox', 'psp_sandbox', 'psp_production'
+    'test_sandbox', 'psp_sandbox'
   )),
   provider_state TEXT NOT NULL DEFAULT 'none' CHECK (provider_state IN (
     'none',
@@ -59,8 +61,7 @@ CREATE TABLE IF NOT EXISTS haraj_bid_securities (
   released_at TIMESTAMPTZ,
   created_by_admin_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK (provider_mode <> 'psp_production' OR provider_state <> 'none')
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE haraj_bid_securities IS
@@ -85,11 +86,11 @@ CREATE INDEX IF NOT EXISTS idx_haraj_bid_securities_expires
   ON haraj_bid_securities (expires_at)
   WHERE status IN ('authorized', 'active') AND expires_at IS NOT NULL;
 
--- Derived exposure is authoritative from auctions+bids.
--- Snapshots exist only so a replayed idempotency key cannot consume exposure twice.
+-- Derived exposure is AUTHORITATIVE from auctions+bids.
+-- Snapshots are append-only idempotency/audit; never the sole exposure truth.
 CREATE TABLE IF NOT EXISTS haraj_bidder_exposure_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bidder_user_id TEXT NOT NULL,
+  bidder_user_id TEXT NOT NULL REFERENCES haraj_bidder_profiles(user_id) ON DELETE RESTRICT,
   auction_id UUID NOT NULL REFERENCES auctions(id) ON DELETE RESTRICT,
   bid_id UUID REFERENCES bids(id) ON DELETE SET NULL,
   bid_amount NUMERIC(14, 2) NOT NULL CHECK (bid_amount > 0),
@@ -110,12 +111,29 @@ CREATE TABLE IF NOT EXISTS haraj_bidder_audit_events (
   event_type TEXT NOT NULL,
   actor_user_id TEXT,
   actor_role TEXT,
+  auction_id UUID REFERENCES auctions(id) ON DELETE RESTRICT,
+  correlation_id TEXT,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+COMMENT ON TABLE haraj_bidder_audit_events IS
+  'Append-only G10 audit. UPDATE/DELETE are rejected by trigger.';
+
 CREATE INDEX IF NOT EXISTS idx_haraj_bidder_audit
   ON haraj_bidder_audit_events (bidder_user_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION haraj_bidder_audit_immutable()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'haraj_bidder_audit_events is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS haraj_bidder_audit_no_mutate ON haraj_bidder_audit_events;
+CREATE TRIGGER haraj_bidder_audit_no_mutate
+  BEFORE UPDATE OR DELETE ON haraj_bidder_audit_events
+  FOR EACH ROW EXECUTE PROCEDURE haraj_bidder_audit_immutable();
 
 -- Concurrency strategy (application, same transaction as placeBid):
 --   SELECT pg_advisory_xact_lock(hashtext('nomas:bidder-exposure:' || bidder_user_id));

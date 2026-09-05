@@ -18,6 +18,9 @@ describe('G10 bidder eligibility / exposure domain', () => {
     assert.equal(g10.STAGING_TEST_PROVIDER.productionReady, false);
     assert.equal(g10.G10_POLICY_SCOPE, 'global');
     assert.match(g10.acquireBidderExposureLockSql(), /nomas:bidder-exposure:/);
+    assert.match(g10.LOCK_ORDER, /bidder-exposure/);
+    assert.match(g10.LOCK_ORDER, /acquireAuctionLock/);
+    assert.match(g10.DEADLOCK_ANALYSIS, /never lock auction then bidder/);
   });
 
   it('counts only the current highest live bid and drops outbid exposure', () => {

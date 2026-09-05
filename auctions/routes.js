@@ -17,7 +17,7 @@ const {
   mapAuctionRow,
   appendEvent,
 } = require('./services/auction_service');
-const { placeBid } = require('./services/bid_service');
+const harajG10 = require('./services/haraj_bidder_security');
 const {
   registerHost,
   updateHostProfile,
@@ -220,6 +220,18 @@ function registerAuctionRoutes(app, ctx) {
       res.status(err.status || 500).json({ message: err.message, code: err.code });
     }
   }
+
+  router.get('/haraj/me/eligibility', auth, requireSessionUser, async (req, res) => {
+    try {
+      const dossier = await withTransaction((client) => harajG10.getSelfEligibility(client, req.authUserId));
+      res.json({
+        eligibility: dossier,
+        livekit: { implemented: false, classification: 'NOT IMPLEMENTED / NOT TESTED' },
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
 
   router.get('/haraj/rooms/:roomSessionId', auth, requireSessionUser, async (req, res) => {
     try {
@@ -871,12 +883,14 @@ function registerAuctionRoutes(app, ctx) {
       const idempotencyKey =
         req.headers['idempotency-key'] || req.body?.idempotencyKey;
       const result = await withTransaction((client) =>
-        placeBid(client, {
+        harajG10.placeBidGuarded(client, {
           auctionId: req.params.id,
           bidderUserId: req.authUserId,
           amount: req.body?.amount,
           idempotencyKey,
           expectedVersion: req.body?.expectedVersion,
+          clientBody: req.body,
+          correlationId: req.get('x-request-id') || idempotencyKey,
         }),
       );
       if (auctionRealtime && result.auction && !result.replay) {
@@ -2002,6 +2016,115 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     requireAdminAuth,
     requirePerm('auctions:ops'),
     (req, res) => runAdminLive(req, res, harajLiveAdmin.skipLot, 'lot.skipped'),
+  );
+
+  adminRouter.get(
+    '/haraj/bidders/:userId',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const dossier = await withTransaction((client) => harajG10.getBidderDossier(client, req.params.userId));
+        res.json({
+          dossier,
+          lockOrder: harajG10.LOCK_ORDER,
+          invariant: harajG10.EXPOSURE_INVARIANT,
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.put(
+    '/haraj/bidders/:userId',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const profile = await withTransaction((client) =>
+          harajG10.upsertBidderProfile(client, {
+            userId: req.params.userId,
+            eligibilityStatus: req.body?.eligibilityStatus,
+            bidLimit: req.body?.bidLimit,
+            adminId: harajActor(req),
+            suspendedReason: req.body?.suspendedReason,
+            revokedReason: req.body?.revokedReason,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: 'haraj.bidder.upsert',
+          entityType: 'haraj_bidder_profile',
+          entityId: req.params.userId,
+        });
+        res.json({ profile });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code, details: err.details });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/bidders/:userId/security',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const security = await withTransaction((client) =>
+          harajG10.issueStagingTestSecurity(client, {
+            userId: req.params.userId,
+            authorizedLimit: req.body?.authorizedLimit,
+            adminId: harajActor(req),
+            expiresAt: req.body?.expiresAt,
+            idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: 'haraj.bidder.security.issue',
+          entityType: 'haraj_bid_security',
+          entityId: security.id,
+        });
+        res.status(201).json({
+          security,
+          provider: harajG10.STAGING_TEST_PROVIDER,
+          realMoney: false,
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/bidders/:userId/suspend',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const profile = await withTransaction((client) =>
+          harajG10.upsertBidderProfile(client, {
+            userId: req.params.userId,
+            eligibilityStatus: 'suspended',
+            adminId: harajActor(req),
+            suspendedReason: req.body?.reason || 'admin_suspend',
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: 'haraj.bidder.suspend',
+          entityType: 'haraj_bidder_profile',
+          entityId: req.params.userId,
+        });
+        res.json({ profile });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code, details: err.details });
+      }
+    },
   );
 
   adminRouter.get(
