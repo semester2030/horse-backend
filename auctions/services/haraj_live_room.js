@@ -33,6 +33,21 @@ const LIVEKIT = {
   productionFallback: false,
 };
 
+function observe(action, snapshot, extra = {}) {
+  console.log(JSON.stringify({
+    ev: 'haraj.g9',
+    action,
+    roomId: snapshot.roomId || extra.roomId || null,
+    roomSessionId: snapshot.roomSessionId || extra.roomSessionId || null,
+    sessionId: snapshot.sessionId || extra.sessionId || null,
+    auctionId: snapshot.activeLotId || extra.auctionId || null,
+    auctioneerId: snapshot.auctioneerUserId || extra.auctioneerId || null,
+    status: snapshot.status || extra.status || null,
+    correlationId: extra.correlationId || extra.requestId || null,
+    serverTimestamp: new Date().toISOString(),
+  }));
+}
+
 function fail(status, code, message) {
   const err = new Error(message);
   err.status = status;
@@ -410,6 +425,7 @@ async function completeRoom(client, { roomSessionId, actorUserId, admin }) {
 }
 
 function publishIfPossible(auctionRealtime, snapshot, type) {
+  observe(type, snapshot);
   if (!auctionRealtime || typeof auctionRealtime.publishHarajRoom !== 'function') return null;
   return auctionRealtime.publishHarajRoom(eventContract(type, {
     id: snapshot.roomSessionId,
