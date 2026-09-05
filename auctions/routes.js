@@ -18,6 +18,8 @@ const {
   appendEvent,
 } = require('./services/auction_service');
 const harajG10 = require('./services/haraj_bidder_security');
+const harajInspection = require('./services/haraj_inspection');
+const opsNotify = require('../ops_notify');
 const {
   registerHost,
   updateHostProfile,
@@ -73,6 +75,7 @@ const {
   } = require('./services/lifecycle_auth');
   const {
     requireHarajAuctioneer,
+    isHarajAuctioneer,
   } = require('./services/haraj_auctioneer_auth');
   const harajReview = require('./services/haraj_auctioneer_review');
 const { getPool } = require('./db');
@@ -166,6 +169,7 @@ function registerAuctionRoutes(app, ctx) {
           id: item.id,
           status: item.status,
         });
+        item.harajInspection = await harajInspection.publicSummary(pool, item.id);
       }
       res.json({
         auctions: list,
@@ -220,6 +224,171 @@ function registerAuctionRoutes(app, ctx) {
       res.status(err.status || 500).json({ message: err.message, code: err.code });
     }
   }
+
+  function dispatchInspectionNotifications(items) {
+    if (!items || !items.length || !ctx.store) return;
+    if (harajInspection.isProductionNotifyForbidden()) return;
+    const idFn = ctx.id || (() => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    for (const item of items) {
+      opsNotify.notifyUser(
+        { store: ctx.store, id: idFn },
+        {
+          userId: item.userId,
+          title: item.title,
+          body: item.body,
+          meta: item.meta,
+        },
+      );
+    }
+    if (typeof ctx.saveStore === 'function') ctx.saveStore();
+  }
+
+  router.get('/haraj/inspections/mine', auth, requireSessionUser, async (req, res) => {
+    try {
+      const cases = await withTransaction((client) =>
+        harajInspection.listCases(client, {
+          actorUserId: req.authUserId,
+          actorRole: 'buyer',
+          limit: req.query.limit,
+        }),
+      );
+      res.json({
+        cases,
+        serverTime: new Date().toISOString(),
+        settlementImplemented: false,
+        livekit: { implemented: false, classification: 'NOT IMPLEMENTED / NOT TESTED' },
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.get('/haraj/inspections', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
+    try {
+      const cases = await withTransaction((client) =>
+        harajInspection.listCases(client, {
+          actorUserId: req.authUserId,
+          actorRole: 'auctioneer',
+          limit: req.query.limit,
+        }),
+      );
+      res.json({ cases, serverTime: new Date().toISOString() });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.get('/:id/inspection', auth, requireSessionUser, async (req, res) => {
+    try {
+      const inspection = await withTransaction((client) =>
+        harajInspection.getInspectionCase(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          actorRole: isHarajAuctioneer(req.authUser, req.authUserId) ? 'auctioneer' : undefined,
+        }),
+      );
+      res.json({
+        inspection,
+        serverTime: new Date().toISOString(),
+        settlementImplemented: false,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/inspection/ensure', auth, requireSessionUser, async (req, res) => {
+    try {
+      const result = await withTransaction((client) =>
+        harajInspection.ensureInspectionCase(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          actorRole: 'buyer',
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchInspectionNotifications(result.notifications);
+      res.status(result.replay ? 200 : 201).json({
+        inspection: result.case,
+        replay: result.replay,
+        settlementImplemented: false,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/inspection/decision', auth, requireSessionUser, async (req, res) => {
+    try {
+      if (req.body?.winnerUserId || req.body?.winner_user_id || req.body?.userId || req.body?.auctionId) {
+        return res.status(403).json({
+          message: 'Client-supplied winner/user/auction identity is not authoritative',
+          code: 'INSPECTION_CLIENT_AUTHORITY_FORBIDDEN',
+        });
+      }
+      const result = await withTransaction((client) =>
+        harajInspection.submitBuyerDecision(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          outcome: req.body?.outcome,
+          reasonCategory: req.body?.reasonCategory,
+          statement: req.body?.statement,
+          evidence: req.body?.evidence,
+          expectedUpdatedAt: req.body?.expectedUpdatedAt,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchInspectionNotifications(result.notifications);
+      res.json({
+        inspection: result.case,
+        replay: result.replay,
+        settlementImplemented: false,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/inspection/seller-response', auth, requireSessionUser, async (req, res) => {
+    try {
+      const result = await withTransaction((client) =>
+        harajInspection.sellerRespond(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          statement: req.body?.statement,
+          expectedUpdatedAt: req.body?.expectedUpdatedAt,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      res.json({ inspection: result.case, replay: result.replay });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/inspection/schedule', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
+    try {
+      if (req.body?.winnerUserId || req.body?.currentPrice || req.body?.bidAmount) {
+        return res.status(403).json({
+          message: 'Auctioneer cannot change winner, bids, or money',
+          code: 'INSPECTION_AUCTIONEER_FORBIDDEN',
+        });
+      }
+      const inspection = await withTransaction((client) =>
+        harajInspection.scheduleInspection(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          actorRole: 'auctioneer',
+          scheduledAt: req.body?.scheduledAt,
+          notes: req.body?.notes,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      res.json({ inspection });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
 
   router.get('/haraj/me/eligibility', auth, requireSessionUser, async (req, res) => {
     try {
@@ -401,6 +570,7 @@ function registerAuctionRoutes(app, ctx) {
         id: auction.id,
         status: auction.status,
       });
+      auction.harajInspection = await harajInspection.publicSummary(pool, auction.id);
       res.json({
         auction,
         bids: page.bids,
@@ -926,6 +1096,10 @@ function registerAuctionRoutes(app, ctx) {
         const closed = await closeAuctionAtomic(client, req.params.id, {
           actorUserId: req.authUserId,
         });
+        const ensured = await harajInspection.ensureAfterClose(client, {
+          auction: closed,
+          actorUserId: req.authUserId,
+        });
         const { rows } = await client.query(
           `SELECT payload FROM auction_events
            WHERE auction_id = $1 AND event_type = 'auction.closed'
@@ -933,12 +1107,13 @@ function registerAuctionRoutes(app, ctx) {
           [req.params.id],
         );
         closedPayload = rows[0]?.payload || {};
-        return closed;
+        return { closed, notifications: ensured?.notifications || [] };
       });
+      dispatchInspectionNotifications(auction.notifications);
       if (auctionRealtime) {
-        auctionRealtime.publishClosed(auction, closedPayload);
+        auctionRealtime.publishClosed(auction.closed, closedPayload);
       }
-      res.json({ auction });
+      res.json({ auction: auction.closed, inspectionCreated: Boolean(auction.notifications?.length) });
     } catch (err) {
       res.status(err.status || 500).json({ message: err.message, code: err.code });
     }
@@ -2123,6 +2298,162 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
         res.json({ profile });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code, details: err.details });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/inspections',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const cases = await withTransaction((client) =>
+          harajInspection.listCases(client, {
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+            limit: req.query.limit,
+          }),
+        );
+        res.json({ cases, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/inspections/:auctionId',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const inspection = await withTransaction((client) =>
+          harajInspection.getInspectionCase(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+          }),
+        );
+        res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/inspections/:auctionId/ensure',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const result = await withTransaction((client) =>
+          harajInspection.ensureInspectionCase(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+            windowHours: req.body?.windowHours,
+            idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: 'haraj.inspection.ensure',
+          entityType: 'haraj_inspection',
+          entityId: req.params.auctionId,
+        });
+        res.status(result.replay ? 200 : 201).json({
+          inspection: result.case,
+          replay: result.replay,
+          settlementImplemented: false,
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/inspections/:auctionId/resolve',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const result = await withTransaction((client) =>
+          harajInspection.resolveMismatch(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+            resolution: req.body?.resolution,
+            note: req.body?.note,
+            expectedUpdatedAt: req.body?.expectedUpdatedAt,
+            idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: `haraj.inspection.resolve.${req.body?.resolution || 'unknown'}`,
+          entityType: 'haraj_inspection',
+          entityId: req.params.auctionId,
+        });
+        res.json({ inspection: result.case, replay: result.replay, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/inspections/:auctionId/expire',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        const inspection = await withTransaction((client) =>
+          harajInspection.expireCheck(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+            stagingForce: req.body?.stagingForce === true,
+          }),
+        );
+        res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/inspections/:auctionId/expert-finding',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const inspection = await withTransaction((client) =>
+          harajInspection.addExpertFinding(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+            performed: req.body?.performed,
+            observations: req.body?.observations,
+            documents: req.body?.documents,
+            idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: 'haraj.inspection.expert_finding',
+          entityType: 'haraj_inspection',
+          entityId: req.params.auctionId,
+        });
+        res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
     },
   );

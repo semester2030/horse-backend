@@ -47,6 +47,11 @@ describe('G10 bidder eligibility / exposure domain', () => {
       pos('U', 'unsold', 1000, [{ bidderUserId: 'x', amount: 1000, createdAt: 't' }]),
     ];
     assert.equal(g10.totalActiveExposure(positions, 'x'), 80000);
+    const voided = [{
+      auction: { id: 'W', status: 'sold', currentPrice: 80000, winnerUserId: 'x', awardStatus: 'cancelled' },
+      bids: [],
+    }];
+    assert.equal(g10.totalActiveExposure(voided, 'x'), 0);
   });
 
   it('rejects 70k+70k against a 100k limit and allows 50k+60k against 200k', () => {

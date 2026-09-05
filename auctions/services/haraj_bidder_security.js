@@ -55,7 +55,7 @@ const STAGING_TEST_PROVIDER = Object.freeze({
 const EXPOSURE_INVARIANT = [
   'TOTAL_ACTIVE_EXPOSURE is the sum of binding obligations for one bidder across all auctions.',
   'A live/extended/frozen obligation exists only while the bidder is the current highest valid bid.',
-  'An ended/sold obligation exists only while winner_user_id = bidder (provisional award until G11/G19).',
+  'An ended/sold obligation exists only while winner_user_id = bidder, unless G11 award.status = cancelled (confirmed mismatch / authorized void).',
   'cancelled / unsold / draft / review / scheduled contribute 0.',
   'Outbid replaces the previous highest bidder — loser’s amount drops out (no double count).',
   'Raising your own high bid replaces that auction’s contribution (not prior+new).',
@@ -90,6 +90,7 @@ function obligationOnAuction(auction, bids, bidderUserId) {
   if (RELEASED.has(status)) return 0;
   const bidder = String(bidderUserId);
   if (BINDING_CLOSED_WINNER.has(status)) {
+    if (String(auction.awardStatus || '') === 'cancelled') return 0;
     return String(auction.winnerUserId || '') === bidder ? money(auction.currentPrice) : 0;
   }
   if (!BINDING_OPEN.has(status)) return 0;
@@ -251,18 +252,36 @@ async function loadActiveSecurity(client, userId) {
   return rows[0] || null;
 }
 
+async function awardTablesReady(client) {
+  const { rows } = await client.query(`SELECT to_regclass('public.haraj_provisional_awards') AS t`);
+  return Boolean(rows[0] && rows[0].t);
+}
+
 async function loadPositionsForBidder(client, bidderUserId) {
+  const hasAwards = await awardTablesReady(client);
   const { rows: auctions } = await client.query(
-    `SELECT a.id, a.status, a.current_price, a.winner_user_id
-     FROM auctions a
-     WHERE a.status = ANY($2::text[])
-       AND (
-         a.winner_user_id = $1
-         OR EXISTS (
-           SELECT 1 FROM bids b
-           WHERE b.auction_id = a.id AND b.bidder_user_id = $1
-         )
-       )`,
+    hasAwards
+      ? `SELECT a.id, a.status, a.current_price, a.winner_user_id, p.status AS award_status
+         FROM auctions a
+         LEFT JOIN haraj_provisional_awards p ON p.auction_id = a.id
+         WHERE a.status = ANY($2::text[])
+           AND (
+             a.winner_user_id = $1
+             OR EXISTS (
+               SELECT 1 FROM bids b
+               WHERE b.auction_id = a.id AND b.bidder_user_id = $1
+             )
+           )`
+      : `SELECT a.id, a.status, a.current_price, a.winner_user_id, NULL::text AS award_status
+         FROM auctions a
+         WHERE a.status = ANY($2::text[])
+           AND (
+             a.winner_user_id = $1
+             OR EXISTS (
+               SELECT 1 FROM bids b
+               WHERE b.auction_id = a.id AND b.bidder_user_id = $1
+             )
+           )`,
     [String(bidderUserId), ['live', 'extended', 'frozen', 'ended', 'sold']],
   );
   const positions = [];
@@ -279,6 +298,7 @@ async function loadPositionsForBidder(client, bidderUserId) {
         status: auction.status,
         currentPrice: Number(auction.current_price),
         winnerUserId: auction.winner_user_id,
+        awardStatus: auction.award_status || null,
       },
       bids: bids.rows.map((row) => ({
         bidderUserId: row.bidder_user_id,
