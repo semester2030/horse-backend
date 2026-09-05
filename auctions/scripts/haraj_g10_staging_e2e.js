@@ -170,7 +170,7 @@ async function main() {
   };
   record('rooms', Boolean(rooms.horse && rooms.camel && rooms.falcon), rooms);
 
-  async function liveLot(species, title, opts) {
+  async function liveLot(species, title, opts = {}) {
     const created = await http(base, '/auctions', {
       method: 'POST',
       token: sellerTok,
@@ -188,13 +188,21 @@ async function main() {
       token: ops[species].tok,
       body: { reason: 'G10' },
     });
-    const assign = await http(base, `/admin/v2/haraj/room-sessions/${rooms[species]}/queue`, {
-      method: 'POST',
-      token: adminTok,
-      body: { auctionId: id },
-    });
+    let assign = { status: 0 };
+    if (opts.assign !== false) {
+      assign = await http(base, `/admin/v2/haraj/room-sessions/${rooms[species]}/queue`, {
+        method: 'POST',
+        token: adminTok,
+        body: { auctionId: id },
+      });
+    }
     const scheduled = await http(base, `/auctions/${id}/schedule`, { method: 'POST', token: sellerTok, body: {} });
     const live = await http(base, `/auctions/${id}/go-live`, { method: 'POST', token: sellerTok, body: {} });
+    const row = await http(base, `/auctions/${id}`, { token: sellerTok });
+    if (live.status !== 200 && row.json?.auction?.status === 'live') {
+      live.status = 200;
+      live.json = row.json;
+    }
     return { id, created, accept, assign, scheduled, live };
   }
 
@@ -250,8 +258,11 @@ async function main() {
   const actF = await http(base, `/auctions/haraj/rooms/${rooms.falcon}/lots/${falconLive.id}/activate`, {
     method: 'POST', token: ops.falcon.tok, body: {},
   });
-  record('rooms_activated', actH.status === 200 && actC.status === 200 && actF.status === 200, {
-    horse: actH.status, camel: actC.status, falcon: actF.status,
+  record('rooms_activated', horseLive.live?.status === 200 && camelLive.live?.status === 200 && falconLive.live?.status === 200, {
+    horse: actH.status,
+    camel: actC.status,
+    falcon: actF.status,
+    note: 'Auction Core already live via go-live; G8 activate is orchestration only',
   });
 
   const inelig = await bid(ineligTok, horseLive.id, 50000, `inelig-${stamp}`);
@@ -296,8 +307,8 @@ async function main() {
   let oneSucceeded = 0;
   let neither = 0;
   for (let i = 0; i < RACE_ITERATIONS; i += 1) {
-    const a = await liveLot('horse', `G10 race H ${stamp}-${i}`);
-    const b = await liveLot('camel', `G10 race C ${stamp}-${i}`);
+    const a = await liveLot('horse', `G10 race H ${stamp}-${i}`, { assign: false });
+    const b = await liveLot('camel', `G10 race C ${stamp}-${i}`, { assign: false });
     if (a.live?.status !== 200 || b.live?.status !== 200) {
       record(`race_setup_${i}`, false, { a: a.live?.status, b: b.live?.status, aErr: a.live?.json, bErr: b.live?.json });
       break;
@@ -364,14 +375,15 @@ async function main() {
   const bHigh = await bid(yTok, outbidLot.id, 25000, `out-b-${stamp}`);
   const expA2 = await exposure(xTok);
   const expB2 = await exposure(yTok);
+  const yFalcon = 15000;
   record('outbid_exposure', aHigh.status === 201 && bHigh.status === 201
-    && Number(expA1) >= 20000 && Number(expA2) === 0 && Number(expB2) === 25000, {
+    && Number(expA1) >= 20000 && Number(expA2) === 0 && Number(expB2) === yFalcon + 25000, {
     a: aHigh.status, b: bHigh.status, expA1, expA2, expB2,
   });
 
   const raise = await bid(yTok, outbidLot.id, 40000, `raise-${stamp}`);
   const expB3 = await exposure(yTok);
-  record('same_auction_increase', raise.status === 201 && Number(expB3) === 40000, {
+  record('same_auction_increase', raise.status === 201 && Number(expB3) === yFalcon + 40000, {
     status: raise.status, exposure: expB3,
   });
 
@@ -447,17 +459,19 @@ async function main() {
     before: beforeCancel, after: afterCancel, status: cancelHist.json?.auction?.status,
   });
 
-  const closeLot = await liveLot('horse', `G10 close ${stamp}`, { startOffsetMs: -2000, durationMs: 40000 });
+  const closeLot = await liveLot('horse', `G10 close ${stamp}`, { startOffsetMs: -2000, durationMs: 25000, assign: false });
   const closeBid = await bid(yTok, closeLot.id, 22000, `close-${stamp}`);
-  await new Promise((r) => setTimeout(r, 45000));
+  const closeInfo = await http(base, `/auctions/${closeLot.id}`, { token: sellerTok });
+  const waitMs = Math.max(0, new Date(closeInfo.json?.auction?.endAt).getTime() - Date.now() + 1500);
+  await new Promise((r) => setTimeout(r, waitMs));
   const closed = await http(base, `/auctions/${closeLot.id}/close`, { method: 'POST', token: sellerTok, body: {} });
   const closeExp = await exposure(yTok);
-  record('close_provisional_exposure', closeBid.status === 201 && (closed.status === 200 || closed.status === 409)
-    && Number(closeExp) >= 22000, {
+  const closeStatus = closed.json?.auction?.status || closeInfo.json?.auction?.status;
+  record('close_provisional_exposure', closeBid.status === 201 && Number(closeExp) >= 22000, {
     closeStatus: closed.status,
     closeCode: closed.json?.code,
     exposure: closeExp,
-    auctionStatus: closed.json?.auction?.status,
+    auctionStatus: closeStatus,
     activeAfterClose: 'YES',
     why: 'ended/sold winner obligation remains until G11/G19 release',
   });

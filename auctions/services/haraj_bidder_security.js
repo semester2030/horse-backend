@@ -547,7 +547,9 @@ async function placeBidGuarded(client, {
   if (!auction) {
     fail(404, 'AUCTION_NOT_FOUND', 'Auction not found');
   }
-  const enforce = ready && auction.haraj_mode === 'haraj_queued';
+  // After 011, every HTTP bid is a financial event. Restricting to haraj_queued
+  // allowed standalone go-live lots to bypass bidder-wide exposure (70k+70k).
+  const enforce = ready;
   const { placeBid } = require('./bid_service');
   if (!enforce) {
     return placeBid(client, {
