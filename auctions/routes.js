@@ -1212,6 +1212,263 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
     },
   );
 
+  const harajSchedule = require('./services/haraj_scheduling_engine');
+
+  function requireSchedulerOrAdmin(req, res, next) {
+    const expected = process.env.HARAJ_SCHEDULER_KEY;
+    const provided = req.get('x-haraj-scheduler-key');
+    if (expected && provided && provided === expected) {
+      req.adminUserId = req.adminUserId || 'system-scheduler';
+      req.adminUser = req.adminUser || { id: 'system-scheduler', role: 'scheduler' };
+      return next();
+    }
+    return requireAdminAuth(req, res, () => requirePerm('auctions:ops')(req, res, next));
+  }
+
+  adminRouter.get(
+    '/haraj/schedule/policies',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const policies = await withTransaction((client) =>
+          harajSchedule.listPolicies(client, {
+            roomId: req.query.roomId,
+            status: req.query.status,
+          }),
+        );
+        res.json({
+          policies,
+          horizonDays: harajSchedule.defaultHorizonDays(),
+          schedulerAuthority: 'backend',
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/schedule/policies',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const policy = await withTransaction((client) =>
+          harajSchedule.createPolicy(client, {
+            body: req.body || {},
+            actorUserId: harajActor(req),
+            store: ctx.store,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          actorName: req.adminUser?.name,
+          action: 'haraj.policy.create',
+          entityType: 'haraj_room_schedule_policy',
+          entityId: policy.id,
+        });
+        res.status(201).json({ policy });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/schedule/policies/:id',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const policy = await withTransaction((client) => harajSchedule.getPolicy(client, req.params.id));
+        res.json({ policy });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.patch(
+    '/haraj/schedule/policies/:id',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const policy = await withTransaction((client) =>
+          harajSchedule.updatePolicy(client, {
+            policyId: req.params.id,
+            body: req.body || {},
+            actorUserId: harajActor(req),
+            store: ctx.store,
+          }),
+        );
+        res.json({ policy });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/schedule/policies/:id/enable',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const policy = await withTransaction((client) =>
+          harajSchedule.setPolicyEnabled(client, {
+            policyId: req.params.id,
+            enabled: true,
+            actorUserId: harajActor(req),
+          }),
+        );
+        res.json({ policy });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/schedule/policies/:id/disable',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const policy = await withTransaction((client) =>
+          harajSchedule.setPolicyEnabled(client, {
+            policyId: req.params.id,
+            enabled: false,
+            actorUserId: harajActor(req),
+          }),
+        );
+        res.json({ policy });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/schedule/preview',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const result = await withTransaction(async (client) => {
+          if (req.body?.policyId) {
+            const policy = await harajSchedule.getPolicy(client, req.body.policyId);
+            return { policy, ...harajSchedule.previewPolicy(policy, { horizonDays: req.body?.horizonDays }) };
+          }
+          return harajSchedule.previewPolicy(req.body || {}, { horizonDays: req.body?.horizonDays });
+        });
+        res.json(result);
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/schedule/occurrences',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const occurrences = await withTransaction((client) =>
+          harajSchedule.listUpcoming(client, {
+            policyId: req.query.policyId,
+            roomId: req.query.roomId,
+            horizonDays: req.query.horizonDays,
+          }),
+        );
+        res.json({
+          occurrences,
+          horizonDays: harajSchedule.defaultHorizonDays(),
+          schedulerAuthority: 'backend',
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/schedule/overrides',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const overrides = await withTransaction((client) =>
+          harajSchedule.listOverrides(client, {
+            policyId: req.query.policyId,
+            roomId: req.query.roomId,
+          }),
+        );
+        res.json({ overrides });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/schedule/overrides',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const result = await withTransaction((client) =>
+          harajSchedule.createOverride(client, {
+            body: req.body || {},
+            actorUserId: harajActor(req),
+            store: ctx.store,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          actorName: req.adminUser?.name,
+          action: 'haraj.override.create',
+          entityType: 'haraj_schedule_override',
+          entityId: result.override?.id,
+        });
+        res.status(result.replayed ? 200 : 201).json(result);
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/schedule/run',
+    requireSchedulerOrAdmin,
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const result = await withTransaction((client) =>
+          harajSchedule.runScheduler(client, {
+            store: ctx.store,
+            actorUserId: harajActor(req) || 'system-scheduler',
+            horizonDays: req.body?.horizonDays,
+          }),
+        );
+        res.json({
+          ...result,
+          schedulerAuthority: 'backend',
+          horizonDays: harajSchedule.defaultHorizonDays(),
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
   adminRouter.get(
     '/haraj/sessions',
     requireAdminAuth,

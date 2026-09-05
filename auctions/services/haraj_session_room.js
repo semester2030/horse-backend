@@ -105,6 +105,8 @@ function mapSession(row, rooms = []) {
     id: row.id,
     categoryId: row.category_id,
     categoryCode: row.category_code || null,
+    policyId: row.policy_id || null,
+    overrideId: row.override_id || null,
     scheduledStartAt: row.scheduled_start_at,
     scheduledEndAt: row.scheduled_end_at,
     actualStartAt: row.actual_start_at,
@@ -769,4 +771,7 @@ module.exports = {
   assignAuctioneer,
   listEligibleLots,
   assertLotFitsRoom,
+  assertAuctioneerFree,
+  audit,
+  lockSession,
 };

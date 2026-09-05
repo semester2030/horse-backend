@@ -3990,7 +3990,7 @@ server.listen(PORT, HOST, async () => {
       console.log(`[auctions] enabled=${auctionsBoot.enabled} ready=${auctionsBoot.ready}`);
       if (auctionsBoot.ready) {
         await startAuctionWsCrossInstance();
-        startAuctionsLifecycle({ auctionRealtime });
+        startAuctionsLifecycle({ auctionRealtime, store });
       }
     }
   } catch (e) {
