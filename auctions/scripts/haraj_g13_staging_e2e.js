@@ -280,6 +280,7 @@ async function main() {
     diffZero('falcon', expected.falcon, metrics.speciesDistribution?.falcon),
     diffZero('totalBids', expected.totalBids, metrics.totalBids),
     diffZero('uniqueBidders', expected.uniqueBidders, metrics.uniqueBidders),
+    diffZero('highestBidVolumeSar', 28000, metrics.highestBidVolumeSar),
   ];
   record('reconciliation_zero_diff', recs.every((r) => r.difference === 0), { recs, metrics });
   record('timezone_riyadh', sellerAn.json?.analytics?.timezone === 'Asia/Riyadh', {

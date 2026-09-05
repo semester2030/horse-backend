@@ -396,7 +396,9 @@ async function getAnalytics(client, filters, { role, actorUserId }) {
          COUNT(*) FILTER (WHERE a.status = 'unsold')::int AS unsold_count,
          COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM bids b WHERE b.auction_id = a.id))::int AS with_bids_count,
          COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM bids b WHERE b.auction_id = a.id))::int AS without_bids_count,
-         COALESCE(SUM(a.current_price), 0)::numeric AS highest_bid_volume_sar,
+         COALESCE(SUM(a.current_price) FILTER (
+           WHERE EXISTS (SELECT 1 FROM bids b WHERE b.auction_id = a.id)
+         ), 0)::numeric AS highest_bid_volume_sar,
          COUNT(DISTINCT a.owner_user_id)::int AS unique_sellers,
          COUNT(*) FILTER (WHERE a.species = 'horse')::int AS horse_count,
          COUNT(*) FILTER (WHERE a.species = 'camel')::int AS camel_count,
