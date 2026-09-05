@@ -60,6 +60,8 @@ function lotBody(title) {
     location: { city: 'الرياض', lat: 24.7136, lng: 46.6753 },
     mediaVideoHlsUrl: 'https://videodelivery.net/g8-e2e/manifest/video.m3u8',
     mediaVideoCloudflareId: 'g8-e2e-placeholder',
+    description: 'G8 staging lot',
+    inspection: { available: true, windows: 'بعد العصر' },
   };
 }
 
@@ -102,14 +104,51 @@ async function main() {
   async function approved(title) {
     const created = await http(base, '/auctions', { method: 'POST', token: sellerTok, body: lotBody(title) });
     const id = created.json?.auction?.id;
-    await http(base, `/auctions/${id}/submit-review`, { method: 'POST', token: sellerTok, body: { channel: 'haraj' } });
-    await http(base, `/auctions/haraj/review/${id}/accept`, { method: 'POST', token: opTok, body: { reason: 'G8' } });
-    return id;
+    if (!id) {
+      return { id: null, created };
+    }
+    const submitted = await http(base, `/auctions/${id}/submit-review`, {
+      method: 'POST',
+      token: sellerTok,
+      body: { channel: 'haraj' },
+    });
+    const accept = await http(base, `/auctions/haraj/review/${id}/accept`, {
+      method: 'POST',
+      token: opTok,
+      body: { reason: 'G8' },
+    });
+    return { id, created, submitted, accept };
   }
-  const lot1 = await approved(`G8 lot1 ${stamp}`);
-  const lot2 = await approved(`G8 lot2 ${stamp}`);
-  const lot3 = await approved(`G8 lot3 ${stamp}`);
-  record('lots_approved', Boolean(lot1 && lot2 && lot3), { lot1, lot2, lot3 });
+  const a1 = await approved(`G8 lot1 ${stamp}`);
+  const a2 = await approved(`G8 lot2 ${stamp}`);
+  const a3 = await approved(`G8 lot3 ${stamp}`);
+  const lot1 = a1.id;
+  const lot2 = a2.id;
+  const lot3 = a3.id;
+  record('lots_approved', Boolean(lot1 && lot2 && lot3)
+    && a1.accept?.status === 200
+    && a2.accept?.status === 200
+    && a3.accept?.status === 200, {
+    lot1,
+    lot2,
+    lot3,
+    create1: a1.created?.status,
+    accept1: a1.accept?.status,
+    createErr: a1.created?.json?.message || a1.created?.json?.code,
+  });
+  if (!lot1 || !lot2 || !lot3) {
+    const summary = {
+      ok: false,
+      pass: results.filter((r) => r.pass).length,
+      fail: results.filter((r) => !r.pass).length,
+      total: results.length,
+      blocked: 'LOT_CREATE',
+      results,
+    };
+    require('fs').writeFileSync('/tmp/nomas_g8_staging_e2e.json', JSON.stringify(summary, null, 2));
+    console.log(JSON.stringify({ summary: true, ...summary }, null, 2));
+    process.exit(1);
+  }
 
   const start = new Date(Date.now() + 30 * 3600000);
   const session = await http(base, '/admin/v2/haraj/sessions', {
