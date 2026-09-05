@@ -716,7 +716,19 @@ async function assignAuctioneer(client, {
 
 async function listEligibleLots(pool, { species, limit = 50 } = {}) {
   if (species) assertCategoryCode(species);
-  return listQueue(pool, { bucket: 'accepted', species, limit });
+  const lots = await listQueue(pool, { bucket: 'accepted', species, limit });
+  const out = [];
+  for (const lot of lots) {
+    const { rows } = await pool.query(
+      `SELECT id FROM haraj_queue_entries
+       WHERE auction_id = $1 AND status IN ('queued','ready','active')
+       LIMIT 1`,
+      [lot.id],
+    );
+    if (lot.harajReview) lot.harajReview.queueAssigned = Boolean(rows[0]);
+    out.push({ ...lot, queueAssigned: Boolean(rows[0]) });
+  }
+  return out;
 }
 
 async function assertLotFitsRoom(client, { auctionId, roomId }) {
@@ -734,13 +746,19 @@ async function assertLotFitsRoom(client, { auctionId, roomId }) {
   if (lot.species !== room.categoryCode) {
     fail(409, 'HARAJ_CATEGORY_MISMATCH', 'Lot species is not compatible with this room');
   }
+  const queued = await client.query(
+    `SELECT id FROM haraj_queue_entries
+     WHERE auction_id = $1 AND status IN ('queued','ready','active')
+     LIMIT 1`,
+    [auctionId],
+  );
   return {
     eligible: true,
     auctionId: lot.id,
     species: lot.species,
     roomId: room.id,
     roomCategory: room.categoryCode,
-    queueAssigned: false,
+    queueAssigned: Boolean(queued.rows[0]),
     activeLotAssigned: false,
   };
 }

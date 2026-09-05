@@ -1205,7 +1205,10 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
           species: req.query.species || req.query.category,
           limit: req.query.limit,
         });
-        res.json({ auctions, queueAssigned: false });
+        res.json({
+          auctions,
+          lotIdIsAuctionId: true,
+        });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
@@ -1774,6 +1777,99 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
           entityId: req.params.id,
         });
         res.json({ session });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  const harajQueue = require('./services/haraj_lot_queue');
+
+  adminRouter.get(
+    '/haraj/room-sessions/:id/queue',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const entries = await withTransaction((client) => harajQueue.listQueue(client, req.params.id));
+        res.json({
+          entries,
+          lotIdIsAuctionId: true,
+          liveActivated: false,
+          financialAuthority: false,
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/room-sessions/:id/queue',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const entry = await withTransaction((client) =>
+          harajQueue.assignLot(client, {
+            roomSessionId: req.params.id,
+            auctionId: req.body?.auctionId || req.body?.lotId,
+            actorUserId: harajActor(req),
+            clientCreatedBy: req.body?.createdBy || req.body?.created_by,
+            idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          actorName: req.adminUser?.name,
+          action: 'haraj.queue.assign',
+          entityType: 'haraj_queue_entry',
+          entityId: entry.id,
+        });
+        res.status(201).json({ entry, lotId: entry.auctionId });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/room-sessions/:id/queue/reorder',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const entries = await withTransaction((client) =>
+          harajQueue.reorderQueue(client, {
+            roomSessionId: req.params.id,
+            entryIds: req.body?.entryIds || req.body?.orderedEntryIds,
+            actorUserId: harajActor(req),
+          }),
+        );
+        res.json({ entries });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/queue-entries/:id/withdraw',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const entry = await withTransaction((client) =>
+          harajQueue.withdrawEntry(client, {
+            entryId: req.params.id,
+            reason: req.body?.reason,
+            actorUserId: harajActor(req),
+          }),
+        );
+        res.json({ entry });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
