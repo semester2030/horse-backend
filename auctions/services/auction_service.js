@@ -124,12 +124,27 @@ async function upsertLot(client, { listingId, videoId, species, title }) {
 
 async function createAuctionDraft(client, input) {
   const sp = assertSpecies(input.species);
-  const lot = await upsertLot(client, {
-    listingId: input.listingId,
-    videoId: input.videoId,
-    species: sp,
-    title: input.title,
-  });
+  let lot;
+  if (input.reuseLotId) {
+    const existing = await client.query(
+      `SELECT * FROM auction_lots WHERE id = $1`,
+      [input.reuseLotId],
+    );
+    if (!existing.rows[0]) {
+      const err = new Error('Lot not found for reuse');
+      err.code = 'AUCTION_LOT_NOT_FOUND';
+      err.status = 404;
+      throw err;
+    }
+    lot = existing.rows[0];
+  } else {
+    lot = await upsertLot(client, {
+      listingId: input.listingId,
+      videoId: input.videoId,
+      species: sp,
+      title: input.title,
+    });
+  }
 
   const startAt = new Date(input.startAt);
   const endAt = new Date(input.endAt);

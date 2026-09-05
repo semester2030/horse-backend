@@ -19,6 +19,7 @@ const {
 } = require('./services/auction_service');
 const harajG10 = require('./services/haraj_bidder_security');
 const harajInspection = require('./services/haraj_inspection');
+const harajAfterMarket = require('./services/haraj_after_market');
 const opsNotify = require('../ops_notify');
 const {
   registerHost,
@@ -170,6 +171,7 @@ function registerAuctionRoutes(app, ctx) {
           status: item.status,
         });
         item.harajInspection = await harajInspection.publicSummary(pool, item.id);
+        item.harajAfterMarket = await harajAfterMarket.publicSummary(pool, item.id);
       }
       res.json({
         auctions: list,
@@ -390,6 +392,213 @@ function registerAuctionRoutes(app, ctx) {
     }
   });
 
+  function dispatchAfterHarajNotifications(items) {
+    if (!items || !items.length || !ctx.store) return;
+    if (harajAfterMarket.isProductionNotifyForbidden()) return;
+    const idFn = ctx.id || (() => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    for (const item of items) {
+      opsNotify.notifyUser(
+        { store: ctx.store, id: idFn },
+        {
+          userId: item.userId,
+          title: item.title,
+          body: item.body,
+          meta: item.meta,
+        },
+      );
+    }
+    if (typeof ctx.saveStore === 'function') ctx.saveStore();
+  }
+
+  function afterHarajActorRole(req) {
+    if (isHarajAuctioneer(req.authUser, req.authUserId)) return 'auctioneer';
+    return 'user';
+  }
+
+  router.get('/haraj/after-market', async (req, res) => {
+    try {
+      const listings = await withTransaction((client) =>
+        harajAfterMarket.listDiscovery(client, {
+          species: req.query.species,
+          limit: req.query.limit,
+        }),
+      );
+      res.json({
+        listings,
+        settlementImplemented: false,
+        ai: harajAfterMarket.AI_STATUS,
+        livekit: { implemented: false, classification: 'NOT IMPLEMENTED / NOT TESTED' },
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.get('/:id/after-haraj', auth, requireSessionUser, async (req, res) => {
+    try {
+      const afterHaraj = await withTransaction((client) =>
+        harajAfterMarket.getAfterHaraj(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          actorRole: afterHarajActorRole(req),
+        }),
+      );
+      res.json({
+        afterHaraj,
+        settlementImplemented: false,
+        ai: harajAfterMarket.AI_STATUS,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/after-haraj', auth, requireSessionUser, async (req, res) => {
+    try {
+      if (req.body?.buyerUserId || req.body?.sellerUserId) {
+        return res.status(403).json({
+          message: 'Client cannot spoof buyer or seller identity',
+          code: 'AFTER_HARAJ_IDENTITY_SPOOF',
+        });
+      }
+      const result = await withTransaction((client) =>
+        harajAfterMarket.activateDisposition(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          actorRole: afterHarajActorRole(req),
+          mode: req.body?.mode,
+          approvedPrice: req.body?.approvedPrice,
+          startingPrice: req.body?.startingPrice,
+          reservePrice: req.body?.reservePrice,
+          minimumIncrement: req.body?.minimumIncrement,
+          startAt: req.body?.startAt,
+          endAt: req.body?.endAt,
+          antiSnipingSeconds: req.body?.antiSnipingSeconds,
+          currentPresentation: req.body?.currentPresentation,
+          copyLastBid: req.body?.copyLastBid,
+          useHighestBid: req.body?.useHighestBid,
+          expectedUpdatedAt: req.body?.expectedUpdatedAt,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchAfterHarajNotifications(result.notifications);
+      res.status(result.replay ? 200 : 201).json({
+        afterHaraj: result.view,
+        replay: result.replay,
+        settlementImplemented: false,
+        ai: harajAfterMarket.AI_STATUS,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code, details: err.details });
+    }
+  });
+
+  router.post('/:id/after-haraj/offers', auth, requireSessionUser, async (req, res) => {
+    try {
+      if (req.body?.buyerUserId || req.body?.sellerUserId) {
+        return res.status(403).json({
+          message: 'Client cannot spoof buyer or seller identity',
+          code: 'AFTER_HARAJ_IDENTITY_SPOOF',
+        });
+      }
+      const result = await withTransaction((client) =>
+        harajAfterMarket.submitOffer(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          amount: req.body?.amount,
+          stagingExpiresInSeconds: req.body?.stagingExpiresInSeconds,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchAfterHarajNotifications(result.notifications);
+      res.status(result.replay ? 200 : 201).json({
+        afterHaraj: result.view,
+        offerId: result.offerId,
+        replay: result.replay,
+        settlementImplemented: false,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/after-haraj/offers/:offerId/withdraw', auth, requireSessionUser, async (req, res) => {
+    try {
+      const result = await withTransaction((client) =>
+        harajAfterMarket.withdrawOffer(client, {
+          auctionId: req.params.id,
+          offerId: req.params.offerId,
+          actorUserId: req.authUserId,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchAfterHarajNotifications(result.notifications);
+      res.json({ afterHaraj: result.view, replay: result.replay, settlementImplemented: false });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/after-haraj/offers/:offerId/accept', auth, requireSessionUser, async (req, res) => {
+    try {
+      const result = await withTransaction((client) =>
+        harajAfterMarket.decideOffer(client, {
+          auctionId: req.params.id,
+          offerId: req.params.offerId,
+          decision: 'accept',
+          actorUserId: req.authUserId,
+          actorRole: afterHarajActorRole(req),
+          expectedUpdatedAt: req.body?.expectedUpdatedAt,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchAfterHarajNotifications(result.notifications);
+      res.json({ afterHaraj: result.view, replay: result.replay, settlementImplemented: false });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/after-haraj/offers/:offerId/reject', auth, requireSessionUser, async (req, res) => {
+    try {
+      const result = await withTransaction((client) =>
+        harajAfterMarket.decideOffer(client, {
+          auctionId: req.params.id,
+          offerId: req.params.offerId,
+          decision: 'reject',
+          actorUserId: req.authUserId,
+          actorRole: afterHarajActorRole(req),
+          expectedUpdatedAt: req.body?.expectedUpdatedAt,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchAfterHarajNotifications(result.notifications);
+      res.json({ afterHaraj: result.view, replay: result.replay, settlementImplemented: false });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
+  router.post('/:id/after-haraj/purchase-intent', auth, requireSessionUser, async (req, res) => {
+    try {
+      const result = await withTransaction((client) =>
+        harajAfterMarket.createPurchaseIntent(client, {
+          auctionId: req.params.id,
+          actorUserId: req.authUserId,
+          idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+        }),
+      );
+      dispatchAfterHarajNotifications(result.notifications);
+      res.status(result.replay ? 200 : 201).json({
+        afterHaraj: result.view,
+        replay: result.replay,
+        settlementImplemented: false,
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+  });
+
   router.get('/haraj/me/eligibility', auth, requireSessionUser, async (req, res) => {
     try {
       const dossier = await withTransaction((client) => harajG10.getSelfEligibility(client, req.authUserId));
@@ -571,6 +780,7 @@ function registerAuctionRoutes(app, ctx) {
         status: auction.status,
       });
       auction.harajInspection = await harajInspection.publicSummary(pool, auction.id);
+      auction.harajAfterMarket = await harajAfterMarket.publicSummary(pool, auction.id);
       res.json({
         auction,
         bids: page.bids,
@@ -2452,6 +2662,79 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
           entityId: req.params.auctionId,
         });
         res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/after-market',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const listings = await withTransaction((client) =>
+          harajAfterMarket.listOperatorCases(client, { limit: req.query.limit }),
+        );
+        res.json({
+          listings,
+          settlementImplemented: false,
+          ai: harajAfterMarket.AI_STATUS,
+        });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/after-market/:auctionId',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const afterHaraj = await withTransaction((client) =>
+          harajAfterMarket.getAfterHaraj(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            actorRole: 'admin',
+          }),
+        );
+        res.json({ afterHaraj, settlementImplemented: false, ai: harajAfterMarket.AI_STATUS });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.post(
+    '/haraj/after-market/:auctionId/close',
+    requireAdminAuth,
+    requirePerm('auctions:ops'),
+    async (req, res) => {
+      try {
+        rejectClientActor(req);
+        const result = await withTransaction((client) =>
+          harajAfterMarket.adminClose(client, {
+            auctionId: req.params.auctionId,
+            actorUserId: harajActor(req),
+            reason: req.body?.reason,
+            expectedUpdatedAt: req.body?.expectedUpdatedAt,
+            idempotencyKey: req.get('idempotency-key') || req.body?.idempotencyKey,
+          }),
+        );
+        logAudit(ctx, {
+          actorId: harajActor(req),
+          action: 'haraj.after.close',
+          entityType: 'haraj_after_listings',
+          entityId: req.params.auctionId,
+        });
+        res.json({
+          afterHaraj: result.view,
+          replay: result.replay,
+          settlementImplemented: false,
+        });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
