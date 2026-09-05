@@ -67,10 +67,14 @@ const {
   scheduleAuctionIfEligible,
   approveAuctionReview,
 } = require('./services/approval_flow');
-const {
-  assertOwnerForLifecycle,
-  assertManualGoLiveTimeAllowed,
-} = require('./services/lifecycle_auth');
+  const {
+    assertOwnerForLifecycle,
+    assertManualGoLiveTimeAllowed,
+  } = require('./services/lifecycle_auth');
+  const {
+    requireHarajAuctioneer,
+  } = require('./services/haraj_auctioneer_auth');
+  const harajReview = require('./services/haraj_auctioneer_review');
 const { getPool } = require('./db');
 const { freezeAuction, resumeAuction, adminCancelAuction } = require('./services/ops_service');
 const {
@@ -156,6 +160,13 @@ function registerAuctionRoutes(app, ctx) {
       const list = await queryService.listSellerAuctions(getPool(), req.authUserId, {
         limit: req.query.limit,
       });
+      const pool = getPool();
+      for (const item of list) {
+        item.harajReview = await harajReview.sellerReviewSummary(pool, {
+          id: item.id,
+          status: item.status,
+        });
+      }
       res.json({
         auctions: list,
         serverTime: new Date().toISOString(),
@@ -164,6 +175,114 @@ function registerAuctionRoutes(app, ctx) {
       res.status(500).json({ message: err.message, code: 'AUCTION_MINE_ERROR' });
     }
   });
+
+  router.get('/haraj/review/summary', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
+    try {
+      const counts = await harajReview.summaryCounts(getPool());
+      res.json({ counts, serverTime: new Date().toISOString() });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code || 'AUCTIONEER_SUMMARY_ERROR' });
+    }
+  });
+
+  router.get('/haraj/review/queue', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
+    try {
+      const auctions = await harajReview.listQueue(getPool(), {
+        bucket: req.query.bucket,
+        species: req.query.species,
+        ownerUserId: req.query.seller,
+        city: req.query.city || req.query.location,
+        limit: req.query.limit,
+      });
+      res.json({ auctions, serverTime: new Date().toISOString() });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code || 'AUCTIONEER_QUEUE_ERROR' });
+    }
+  });
+
+  router.get('/haraj/review/:id/history', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
+    try {
+      const history = await withTransaction(async (client) => {
+        await harajReview.getReviewable(client, req.params.id, req.authUserId);
+        return harajReview.listHistory(client, req.params.id, { includeInternal: true });
+      });
+      res.json({ history });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code || 'AUCTIONEER_HISTORY_ERROR' });
+    }
+  });
+
+  router.get('/haraj/review/:id', auth, requireSessionUser, requireHarajAuctioneer, async (req, res) => {
+    try {
+      const auction = await withTransaction((client) =>
+        harajReview.getReviewable(client, req.params.id, req.authUserId),
+      );
+      res.json({
+        auction,
+        dataClasses: {
+          sellerProvided: ['title', 'description', 'species', 'breed', 'media', 'location', 'inspection', 'startingPrice', 'reservePrice'],
+          systemVerified: ['id', 'status', 'createdAt', 'ownerUserId', 'minimumIncrement'],
+          auctioneerNotes: ['harajReview.internalNote'],
+        },
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ message: err.message, code: err.code || 'AUCTIONEER_GET_ERROR' });
+    }
+  });
+
+  function reviewAction(handler) {
+    return async (req, res) => {
+      try {
+        const cid = harajReview.correlationId(req);
+        const auction = await withTransaction((client) =>
+          handler(client, {
+            auctionId: req.params.id,
+            actorUserId: req.authUserId,
+            reason: req.body?.reason,
+            sellerMessage: req.body?.sellerMessage,
+            internalNote: req.body?.internalNote || req.body?.note,
+            expectedStatus: req.body?.expectedStatus,
+            expectedVersion: req.body?.expectedVersion,
+            correlationId: cid,
+          }),
+        );
+        res.json({ auction });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code || 'AUCTIONEER_ACTION_ERROR' });
+      }
+    };
+  }
+
+  router.post(
+    '/haraj/review/:id/accept',
+    auth,
+    requireSessionUser,
+    requireHarajAuctioneer,
+    reviewAction((client, args) => harajReview.acceptLot(client, args)),
+  );
+  router.post(
+    '/haraj/review/:id/request-changes',
+    auth,
+    requireSessionUser,
+    requireHarajAuctioneer,
+    reviewAction((client, args) => harajReview.requestChanges(client, args)),
+  );
+  router.post(
+    '/haraj/review/:id/reject',
+    auth,
+    requireSessionUser,
+    requireHarajAuctioneer,
+    reviewAction((client, args) => harajReview.rejectLot(client, args)),
+  );
+  router.post(
+    '/haraj/review/:id/notes',
+    auth,
+    requireSessionUser,
+    requireHarajAuctioneer,
+    reviewAction((client, args) =>
+      harajReview.addInternalNote(client, { ...args, note: args.internalNote }),
+    ),
+  );
 
   router.get('/', async (req, res) => {
     try {
@@ -204,6 +323,10 @@ function registerAuctionRoutes(app, ctx) {
       }
       const page = await queryService.listBids(pool, req.params.id, { limit: 20 });
       const host = await queryService.getHostBookingForAuction(pool, req.params.id);
+      auction.harajReview = await harajReview.sellerReviewSummary(pool, {
+        id: auction.id,
+        status: auction.status,
+      });
       res.json({
         auction,
         bids: page.bids,

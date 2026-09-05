@@ -534,7 +534,8 @@ function findUserByPhone(phone) {
 }
 
 function issueAuthForUser(user) {
-  const u = roles.migrateLegacyUser({ ...user });
+  const { applyStagingAuctioneerBootstrap } = require('./auctions/services/haraj_auctioneer_auth');
+  const u = applyStagingAuctioneerBootstrap(roles.migrateLegacyUser({ ...user }));
   if (!u.id) u.id = id();
   store.users.set(u.id, u);
   // مطوّر: اعتماد أي طلب خبير معلّق تلقائياً
@@ -735,7 +736,8 @@ function requireSessionUser(req, res, next) {
   if (!raw) {
     return res.status(401).json({ message: 'المستخدم غير موجود — أعد تسجيل الدخول' });
   }
-  req.authUser = roles.migrateLegacyUser({ ...raw });
+  const { applyStagingAuctioneerBootstrap } = require('./auctions/services/haraj_auctioneer_auth');
+  req.authUser = applyStagingAuctioneerBootstrap(roles.migrateLegacyUser({ ...raw }));
   store.users.set(req.authUserId, req.authUser);
   next();
 }
