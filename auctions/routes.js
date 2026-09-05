@@ -21,6 +21,7 @@ const harajG10 = require('./services/haraj_bidder_security');
 const harajInspection = require('./services/haraj_inspection');
 const harajAfterMarket = require('./services/haraj_after_market');
 const harajHistory = require('./services/haraj_history_analytics');
+const harajCommandCenter = require('./services/haraj_admin_command_center');
 const opsNotify = require('../ops_notify');
 const {
   registerHost,
@@ -2738,6 +2739,20 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
           entityId: req.params.auctionId,
         });
         res.json({ inspection, settlementImplemented: false });
+      } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+      }
+    },
+  );
+
+  adminRouter.get(
+    '/haraj/command-center',
+    requireAdminAuth,
+    requirePerm('auctions:read'),
+    async (req, res) => {
+      try {
+        const overview = await withTransaction((client) => harajCommandCenter.getOverview(client));
+        res.json({ overview, ai: harajCommandCenter.AI_STATUS, adminIsNotAuthority: true });
       } catch (err) {
         res.status(err.status || 500).json({ message: err.message, code: err.code });
       }
