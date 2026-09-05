@@ -120,14 +120,33 @@ async function main() {
   }
 
   const stamp = Date.now();
-  const sellerTok = await register(base, `g11.seller.${stamp}@nomas.staging`, 'G11-pass!', 'Seller');
-  const aTok = await register(base, `g11.a.${stamp}@nomas.staging`, 'G11-pass!', 'WinnerA');
-  const bTok = await register(base, `g11.b.${stamp}@nomas.staging`, 'G11-pass!', 'RunnerB');
-  const cTok = await register(base, `g11.c.${stamp}@nomas.staging`, 'G11-pass!', 'WinnerC');
-  const strangerTok = await register(base, `g11.s.${stamp}@nomas.staging`, 'G11-pass!', 'Stranger');
-  const opTok = await register(base, `g11.op.${stamp}@nomas.auctioneer.staging`, 'G11-pass!', 'Op');
-  const admin = await adminLogin(base);
-  const adminTok = admin.json?.token;
+  const users = {
+    seller: { email: `g11.seller.${stamp}@nomas.staging`, password: 'G11-pass!', name: 'Seller' },
+    a: { email: `g11.a.${stamp}@nomas.staging`, password: 'G11-pass!', name: 'WinnerA' },
+    b: { email: `g11.b.${stamp}@nomas.staging`, password: 'G11-pass!', name: 'RunnerB' },
+    c: { email: `g11.c.${stamp}@nomas.staging`, password: 'G11-pass!', name: 'WinnerC' },
+    stranger: { email: `g11.s.${stamp}@nomas.staging`, password: 'G11-pass!', name: 'Stranger' },
+    op: { email: `g11.op.${stamp}@nomas.auctioneer.staging`, password: 'G11-pass!', name: 'Op' },
+  };
+  let sellerTok = await register(base, users.seller.email, users.seller.password, users.seller.name);
+  let aTok = await register(base, users.a.email, users.a.password, users.a.name);
+  let bTok = await register(base, users.b.email, users.b.password, users.b.name);
+  let cTok = await register(base, users.c.email, users.c.password, users.c.name);
+  let strangerTok = await register(base, users.stranger.email, users.stranger.password, users.stranger.name);
+  let opTok = await register(base, users.op.email, users.op.password, users.op.name);
+  let admin = await adminLogin(base);
+  let adminTok = admin.json?.token;
+
+  async function refreshSession() {
+    sellerTok = await register(base, users.seller.email, users.seller.password, users.seller.name);
+    aTok = await register(base, users.a.email, users.a.password, users.a.name);
+    bTok = await register(base, users.b.email, users.b.password, users.b.name);
+    cTok = await register(base, users.c.email, users.c.password, users.c.name);
+    strangerTok = await register(base, users.stranger.email, users.stranger.password, users.stranger.name);
+    opTok = await register(base, users.op.email, users.op.password, users.op.name);
+    admin = await adminLogin(base);
+    adminTok = admin.json?.token;
+  }
   const sellerId = (await http(base, '/auth/me', { token: sellerTok })).json?.user?.id;
   const aId = (await http(base, '/auth/me', { token: aTok })).json?.user?.id;
   const bId = (await http(base, '/auth/me', { token: bTok })).json?.user?.id;
@@ -207,7 +226,8 @@ async function main() {
       }
       const end = new Date(auction?.extendedUntil || auction?.endAt || 0).getTime();
       if (auction?.status === 'live' && Date.now() >= end) {
-        const closed = await http(base, `/auctions/${id}/close`, { method: 'POST', token: sellerCloseTok, body: {} });
+        if (last.status === 401) await refreshSession();
+        const closed = await http(base, `/auctions/${id}/close`, { method: 'POST', token: sellerTok, body: {} });
         if (closed.status === 200 && (closed.json?.auction?.status === 'sold' || closed.json?.auction?.status === 'unsold')) {
           return closed;
         }
@@ -218,13 +238,13 @@ async function main() {
   }
 
   const acceptLot = await liveLot('horse', `G11 accept ${stamp}`, 120000);
-  const bidAcceptA = acceptLot.id ? await bid(aTok, acceptLot.id, 5000, `g11-a-acc-${stamp}`) : { status: 0 };
   const bidAcceptB = acceptLot.id ? await bid(bTok, acceptLot.id, 4000, `g11-b-acc-${stamp}`) : { status: 0 };
+  const bidAcceptA = acceptLot.id ? await bid(aTok, acceptLot.id, 5000, `g11-a-acc-${stamp}`) : { status: 0 };
   const mismatchLot = await liveLot('camel', `G11 mismatch ${stamp}`, 120000);
   const bidMis = mismatchLot.id ? await bid(cTok, mismatchLot.id, 6000, `g11-c-mis-${stamp}`) : { status: 0 };
   const withdrawLot = await liveLot('falcon', `G11 withdraw ${stamp}`, 120000);
-  const bidWA = withdrawLot.id ? await bid(aTok, withdrawLot.id, 7000, `g11-a-w-${stamp}`) : { status: 0 };
   const bidWB = withdrawLot.id ? await bid(bTok, withdrawLot.id, 6500, `g11-b-w-${stamp}`) : { status: 0 };
+  const bidWA = withdrawLot.id ? await bid(aTok, withdrawLot.id, 7000, `g11-a-w-${stamp}`) : { status: 0 };
   const expireLot = await liveLot('horse', `G11 expire ${stamp}`, 120000);
   const bidExp = expireLot.id ? await bid(aTok, expireLot.id, 5500, `g11-a-exp-${stamp}`) : { status: 0 };
   record('lots_live_anti_snipe_zero',
@@ -252,6 +272,7 @@ async function main() {
   const endedMis = await waitUntilSold(mismatchLot.id, sellerTok);
   const endedW = await waitUntilSold(withdrawLot.id, sellerTok);
   const endedExp = await waitUntilSold(expireLot.id, sellerTok);
+  await refreshSession();
 
   const accAuction = endedAccept.json?.auction;
   record('actual_auction_end', accAuction?.status === 'sold' && !endedAccept.extendedBlocked, {
@@ -495,6 +516,7 @@ async function main() {
     code: stale.json?.code,
   });
 
+  await refreshSession();
   const raceLot = await liveLot('horse', `G11 race ${stamp}`, 120000);
   const raceBid = raceLot.id ? await bid(cTok, raceLot.id, 8000, `g11-c-race-${stamp}`) : { status: 0 };
   if (raceBid.status !== 201) {
