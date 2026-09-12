@@ -3047,6 +3047,7 @@ function registerAuctionAdminRoutes(adminRouter, ctx) {
             auctionsCount: count,
             beforeUpdatedAt,
             businessTruthUnchanged: true,
+            businessCommitted: (req.body?.phase || 'handler') === 'notify',
             phase: req.body?.phase || 'handler',
           });
         }

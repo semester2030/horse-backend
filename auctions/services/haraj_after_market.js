@@ -1251,16 +1251,32 @@ async function adminClose(client, input) {
   };
 }
 
+/**
+ * G19.1 — Staging harness provenance for public After-Haraj discovery.
+ * Identifies automated G10–G19 e2e fixtures by title / media id conventions.
+ * Does NOT delete rows. Admin/operator lists remain unfiltered for ops.
+ * Production customer titles are unaffected (no matching harness pattern).
+ */
+function isAutomatedHarnessDiscoveryRow({ lotTitle, mediaVideoCloudflareId } = {}) {
+  const title = String(lotTitle || '').trim();
+  const media = String(mediaVideoCloudflareId || '').trim().toLowerCase();
+  if (/^(G1[0-9]|G12|G18\.?[0-9]*|G19)([\s._\-]|$)/i.test(title)) return true;
+  if (/^(g1[0-9]|g12|g18|g181|g19)([\-_]|$)/i.test(media)) return true;
+  return false;
+}
+
 async function listDiscovery(client, { species, limit } = {}) {
   await assertTables(client);
+  // Over-fetch then filter harness fixtures so RC discovery stays customer-facing.
   const cap = Math.min(Math.max(Number(limit) || 40, 1), 100);
+  const fetchCap = Math.min(cap * 4, 200);
   const params = [];
   let speciesSql = '';
   if (species) {
     params.push(String(species));
     speciesSql = `AND a.species = $${params.length}`;
   }
-  params.push(cap);
+  params.push(fetchCap);
   const { rows } = await client.query(
     `SELECT a.id, a.species, a.status, a.current_price, a.start_at, a.end_at,
             a.media_video_cloudflare_id, a.media_video_hls_url, a.media_video_thumbnail_url,
@@ -1276,20 +1292,26 @@ async function listDiscovery(client, { species, limit } = {}) {
      LIMIT $${params.length}`,
     params,
   );
-  return rows.map((row) => ({
-    auctionId: row.id,
-    lotTitle: row.lot_title,
-    species: row.species,
-    mode: row.mode,
-    listingStatus: row.listing_status,
-    approvedPrice: row.mode === MODES.FIXED_PRICE ? money(row.approved_price) : null,
-    offersEnabled: row.mode === MODES.ACCEPT_OFFERS,
-    historicalHighestBid: money(row.current_price),
-    historicalHighestBidIsNotCurrentPrice: true,
-    media: mediaReuse(row),
-    lastBidUsedAsPrice: false,
-    aiRanked: false,
-  }));
+  return rows
+    .filter((row) => !isAutomatedHarnessDiscoveryRow({
+      lotTitle: row.lot_title,
+      mediaVideoCloudflareId: row.media_video_cloudflare_id,
+    }))
+    .slice(0, cap)
+    .map((row) => ({
+      auctionId: row.id,
+      lotTitle: row.lot_title,
+      species: row.species,
+      mode: row.mode,
+      listingStatus: row.listing_status,
+      approvedPrice: row.mode === MODES.FIXED_PRICE ? money(row.approved_price) : null,
+      offersEnabled: row.mode === MODES.ACCEPT_OFFERS,
+      historicalHighestBid: money(row.current_price),
+      historicalHighestBidIsNotCurrentPrice: true,
+      media: mediaReuse(row),
+      lastBidUsedAsPrice: false,
+      aiRanked: false,
+    }));
 }
 
 async function listOperatorCases(client, { limit } = {}) {
@@ -1361,4 +1383,5 @@ module.exports = {
   listOperatorCases,
   tablesReady,
   isProductionNotifyForbidden,
+  isAutomatedHarnessDiscoveryRow,
 };

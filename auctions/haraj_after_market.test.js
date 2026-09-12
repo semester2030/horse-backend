@@ -133,4 +133,12 @@ describe('G12 After-Haraj market domain', () => {
     assert.equal(g12.canonicalMode('RE_AUCTION'), 're_auction');
     assert.equal(g12.canonicalMode('HISTORY_ONLY'), 'history_only');
   });
+
+  it('excludes automated G12/G18 harness titles from public discovery classifier', () => {
+    assert.equal(g12.isAutomatedHarnessDiscoveryRow({ lotTitle: 'G12 expire 1788587964227' }), true);
+    assert.equal(g12.isAutomatedHarnessDiscoveryRow({ lotTitle: 'G18 g12 horse' }), true);
+    assert.equal(g12.isAutomatedHarnessDiscoveryRow({ mediaVideoCloudflareId: 'g12-fixed' }), true);
+    assert.equal(g12.isAutomatedHarnessDiscoveryRow({ lotTitle: 'فحل عربي أصيل' }), false);
+    assert.equal(g12.isAutomatedHarnessDiscoveryRow({ lotTitle: 'حصان نبيل', mediaVideoCloudflareId: 'cf-prod-abc' }), false);
+  });
 });
