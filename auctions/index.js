@@ -25,6 +25,7 @@ const {
 } = require('./services/lifecycle_worker');
 
 let lifecycleWorker = null;
+let harajScheduler = null;
 let bootState = {
   enabled: false,
   dbConfigured: false,
@@ -129,10 +130,15 @@ async function initAuctionsModule() {
   }
 }
 
-function startAuctionsLifecycle({ auctionRealtime } = {}) {
-  if (lifecycleWorker) return lifecycleWorker;
+function startAuctionsLifecycle({ auctionRealtime, store } = {}) {
   if (!ENABLE_AUCTIONS || !areAuctionsReady()) return null;
-  lifecycleWorker = startAuctionLifecycleWorker({ auctionRealtime });
+  if (!lifecycleWorker) {
+    lifecycleWorker = startAuctionLifecycleWorker({ auctionRealtime });
+  }
+  if (!harajScheduler) {
+    const { startHarajScheduler } = require('./services/haraj_scheduling_engine');
+    harajScheduler = startHarajScheduler({ store });
+  }
   return lifecycleWorker;
 }
 
@@ -140,6 +146,10 @@ function stopAuctionsLifecycle() {
   if (lifecycleWorker) {
     lifecycleWorker.stop();
     lifecycleWorker = null;
+  }
+  if (harajScheduler) {
+    harajScheduler.stop();
+    harajScheduler = null;
   }
 }
 

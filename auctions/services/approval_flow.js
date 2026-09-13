@@ -2,7 +2,11 @@
 
 const { mapAuctionRow, appendEvent, transitionAuction } = require('./auction_service');
 
-const APPROVAL_EVENT_TYPES = ['admin.review.approved', 'auction.review_bypassed_developer'];
+const APPROVAL_EVENT_TYPES = [
+  'admin.review.approved',
+  'auction.review_bypassed_developer',
+  'haraj.auctioneer.accepted',
+];
 
 async function isAuctionApproved(client, auctionId) {
   const { rows } = await client.query(

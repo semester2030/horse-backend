@@ -6,7 +6,7 @@ const TERMINAL = new Set(['sold', 'unsold', 'cancelled']);
 
 const TRANSITIONS = {
   draft: new Set(['review', 'cancelled']),
-  review: new Set(['scheduled', 'cancelled', 'frozen']),
+  review: new Set(['scheduled', 'cancelled', 'frozen', 'draft']),
   scheduled: new Set(['live', 'cancelled', 'frozen']),
   live: new Set(['extended', 'ended', 'cancelled', 'frozen']),
   extended: new Set(['ended', 'cancelled', 'frozen']),

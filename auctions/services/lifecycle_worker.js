@@ -14,6 +14,7 @@ const {
   goLiveIfDue,
   closeAuctionAtomic,
 } = require('./auction_service');
+const harajInspection = require('./haraj_inspection');
 
 const LIFECYCLE_LOCK_KEY = 'nomas:auction:lifecycle_worker';
 
@@ -62,6 +63,10 @@ async function runLifecycleTick({ auctionRealtime } = {}) {
     for (const row of dueClose) {
       try {
         const auction = await closeAuctionAtomic(client, row.id, {
+          actorUserId: 'system',
+        });
+        await harajInspection.ensureAfterClose(client, {
+          auction,
           actorUserId: 'system',
         });
         const { rows: ev } = await client.query(

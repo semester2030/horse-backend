@@ -228,6 +228,7 @@ async function acknowledgeRiskSignal(client, signalId, { adminId } = {}) {
 module.exports = {
   RULES,
   mapRiskRow,
+  insertSignal,
   evaluateRiskSignals,
   listRiskSignals,
   acknowledgeRiskSignal,

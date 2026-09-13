@@ -534,7 +534,8 @@ function findUserByPhone(phone) {
 }
 
 function issueAuthForUser(user) {
-  const u = roles.migrateLegacyUser({ ...user });
+  const { applyStagingAuctioneerBootstrap } = require('./auctions/services/haraj_auctioneer_auth');
+  const u = applyStagingAuctioneerBootstrap(roles.migrateLegacyUser({ ...user }));
   if (!u.id) u.id = id();
   store.users.set(u.id, u);
   // مطوّر: اعتماد أي طلب خبير معلّق تلقائياً
@@ -604,6 +605,15 @@ app.use(
 );
 app.use(express.json());
 
+const harajObs = require('./auctions/services/haraj_observability');
+try {
+  harajObs.assertProductionInjectForbidden();
+} catch (e) {
+  console.error(JSON.stringify({ event: 'g17.inject.boot_forbidden', code: e.code, message: e.message }));
+  throw e;
+}
+app.use(harajObs.observabilityMiddleware);
+
 // مقاييس زمن استجابة API
 app.use((req, res, next) => {
   const start = Date.now();
@@ -642,11 +652,19 @@ if (fs.existsSync(adminConsoleDir)) {
   });
 }
 
-// تسجيل كل طلب وارد (للتشخيص: هل الطلب يصل من الآيفون؟)
-app.use((req, res, next) => {
-  const clientIp = req.ip || req.connection?.remoteAddress || '?';
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} من ${clientIp}`);
-  next();
+app.get('/ready', (req, res) => {
+  const auctions = getAuctionsPublicStatus();
+  const readiness = harajObs.getReadiness({
+    auctionsReady: auctions.ready,
+    dbConfigured: auctions.dbConfigured,
+    schemaVersion: auctions.schemaVersion,
+    migrationsReady: auctions.migrationsReady,
+  });
+  res.status(readiness.ready ? 200 : 503).json({
+    ...readiness,
+    requestId: req.correlationId,
+    auctions,
+  });
 });
 
 // ========== Swagger API Docs (مثل الصور التي أرسلتها) ==========
@@ -708,6 +726,15 @@ app.get('/health', (req, res) => {
     payload.otpDev = otpDev.status();
     payload.smsDetail = smsOtp.status();
   }
+  payload.liveness = true;
+  payload.readiness = harajObs.getReadiness({
+    auctionsReady: payload.auctions?.ready,
+    dbConfigured: payload.auctions?.dbConfigured,
+    schemaVersion: payload.auctions?.schemaVersion,
+    migrationsReady: payload.auctions?.migrationsReady,
+  });
+  payload.version = harajObs.deployedVersion();
+  payload.requestId = req.correlationId;
   res.json(payload);
 });
 
@@ -735,7 +762,8 @@ function requireSessionUser(req, res, next) {
   if (!raw) {
     return res.status(401).json({ message: 'المستخدم غير موجود — أعد تسجيل الدخول' });
   }
-  req.authUser = roles.migrateLegacyUser({ ...raw });
+  const { applyStagingAuctioneerBootstrap } = require('./auctions/services/haraj_auctioneer_auth');
+  req.authUser = applyStagingAuctioneerBootstrap(roles.migrateLegacyUser({ ...raw }));
   store.users.set(req.authUserId, req.authUser);
   next();
 }
@@ -1952,6 +1980,7 @@ const wsHub = createWsHub({
     return roles.migrateLegacyUser({ ...raw });
   },
   canSubscribeRoom(client, room) {
+    if (String(room).startsWith('haraj-room:')) return Boolean(client?.userId);
     if (!String(room).startsWith('auction:')) return true;
     const auctionId = String(room).slice('auction:'.length);
     if (!auctionId) return false;
@@ -3964,6 +3993,17 @@ app.get('/media/stream/:videoId', auth, async (req, res) => {
   }
 });
 
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  harajObs.logStructured('error', 'http.unhandled', {
+    requestId: req.correlationId,
+    taxonomy: harajObs.classify(err, err.status || 500),
+    code: err.code || null,
+  });
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json(harajObs.safeErrorBody(err, req));
+});
+
 // ========== تشغيل الخادم ==========
 // استماع على 0.0.0.0 ليقبل اتصالات من الجهاز الفعلي (iPhone/Android) على نفس الشبكة
 const HOST = process.env.HOST || '0.0.0.0';
@@ -3988,7 +4028,7 @@ server.listen(PORT, HOST, async () => {
       console.log(`[auctions] enabled=${auctionsBoot.enabled} ready=${auctionsBoot.ready}`);
       if (auctionsBoot.ready) {
         await startAuctionWsCrossInstance();
-        startAuctionsLifecycle({ auctionRealtime });
+        startAuctionsLifecycle({ auctionRealtime, store });
       }
     }
   } catch (e) {

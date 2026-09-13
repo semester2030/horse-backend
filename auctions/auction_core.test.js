@@ -19,6 +19,7 @@ describe('Auction V1 — unit (no PostgreSQL required)', () => {
   it('lifecycle transitions follow frozen state machine', () => {
     assert.equal(canTransition('draft', 'review'), true);
     assert.equal(canTransition('review', 'scheduled'), true);
+    assert.equal(canTransition('review', 'draft'), true);
     assert.equal(canTransition('scheduled', 'live'), true);
     assert.equal(canTransition('live', 'extended'), true);
     assert.equal(canTransition('extended', 'ended'), true);
