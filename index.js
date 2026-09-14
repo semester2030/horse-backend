@@ -32,6 +32,7 @@ const fs = require('fs');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const roles = require('./account_roles');
+const detailMedia = require('./detail_media');
 const { validateSheepListing } = require('./sheep_listing');
 const { registerAccountLifecycleRoutes } = require('./account_lifecycle');
 const {
@@ -1230,7 +1231,13 @@ app.post('/horses', auth, requireSessionUser, (req, res) => {
     const sheepErr = validateSheepListing(req.body);
     if (sheepErr) return res.status(400).json({ message: sheepErr });
   }
-  const body = heritageTB.applyClientListingFields(req.body || {}, {});
+  const mediaApplied = detailMedia.applyDetailMediaToBody(req.body || {}, {
+    maxItems: 15,
+  });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
+  const body = heritageTB.applyClientListingFields(mediaApplied.body || {}, {});
   const horseId = id();
   const horse = {
     id: horseId,
@@ -1263,7 +1270,16 @@ app.patch('/horses/:id', auth, requireSessionUser, (req, res) => {
     const sheepErr = validateSheepListing({ ...existing, ...req.body });
     if (sheepErr) return res.status(400).json({ message: sheepErr });
   }
-  const body = heritageTB.applyClientListingFields(req.body || {}, existing);
+  const mediaApplied = detailMedia.applyDetailMediaToBody(req.body || {}, {
+    maxItems: 15,
+  });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
+  const body = heritageTB.applyClientListingFields(
+    mediaApplied.body || {},
+    existing,
+  );
   const nextListingStatus = body.listingStatus || body.status;
   if (
     nextListingStatus != null &&
@@ -2173,11 +2189,17 @@ app.post('/services', auth, requireSessionUser, (req, res) => {
   if (err) return res.status(403).json({ message: err });
   const verifyErr = roles.assertMerchantVerified(req.authUser);
   if (verifyErr) return res.status(403).json({ message: verifyErr });
+  const mediaApplied = detailMedia.applyDetailMediaToBody(req.body || {}, {
+    maxItems: 15,
+  });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
   const serviceId = id();
   const service = {
     id: serviceId,
-    ...req.body,
-    type: serviceType || req.body?.type,
+    ...mediaApplied.body,
+    type: serviceType || mediaApplied.body?.type,
     providerId: req.authUserId,
     createdAt: new Date().toISOString(),
   };
@@ -2197,9 +2219,15 @@ app.patch('/services/:id', auth, requireSessionUser, (req, res) => {
   if (String(existing.providerId || '') !== req.authUserId) {
     return res.status(403).json({ message: 'غير مصرح بتعديل هذه الخدمة' });
   }
+  const mediaApplied = detailMedia.applyDetailMediaToBody(req.body || {}, {
+    maxItems: 15,
+  });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
   const updated = {
     ...existing,
-    ...req.body,
+    ...mediaApplied.body,
     id,
     providerId: existing.providerId,
     updatedAt: new Date().toISOString(),
@@ -2352,20 +2380,34 @@ app.post('/catalog/items', auth, requireSessionUser, (req, res) => {
   if (!body.name || !String(body.name).trim()) {
     return res.status(400).json({ message: 'اسم المنتج مطلوب' });
   }
+  const mediaApplied = detailMedia.applyDetailMediaToBody(body, { maxItems: 8 });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
+  const mediaBody = mediaApplied.body || body;
   const itemId = id();
   const item = {
     id: itemId,
     sellerId: req.authUserId,
     sellerRole: req.authUser.accountRole,
     category,
-    applicableSpecies: parseSpeciesList(body.applicableSpecies).length
-      ? parseSpeciesList(body.applicableSpecies)
+    applicableSpecies: parseSpeciesList(mediaBody.applicableSpecies).length
+      ? parseSpeciesList(mediaBody.applicableSpecies)
       : ['horse'],
-    subCategory: String(body.subCategory || '').trim(),
-    name: String(body.name).trim(),
-    description: String(body.description || '').trim(),
-    images: Array.isArray(body.images) ? body.images.map(String) : [],
-    price: Number(body.price) || 0,
+    subCategory: String(mediaBody.subCategory || '').trim(),
+    name: String(mediaBody.name).trim(),
+    description: String(mediaBody.description || '').trim(),
+    images: Array.isArray(mediaBody.images) ? mediaBody.images.map(String) : [],
+    ...(Array.isArray(mediaBody.detailMedia)
+      ? { detailMedia: mediaBody.detailMedia }
+      : {}),
+    ...(mediaBody.videoUrl
+      ? {
+          videoId: mediaBody.videoId || '',
+          videoUrl: mediaBody.videoUrl || '',
+        }
+      : {}),
+    price: Number(mediaBody.price) || 0,
     currency: String(body.currency || 'SAR'),
     unit: String(body.unit || '').trim(),
     location: body.location && typeof body.location === 'object' ? body.location : {},
@@ -2407,6 +2449,11 @@ app.patch('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
     return res.status(403).json({ message: 'غير مصرح بتعديل هذا المنتج' });
   }
   const body = req.body || {};
+  const mediaApplied = detailMedia.applyDetailMediaToBody(body, { maxItems: 8 });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
+  const mediaBody = mediaApplied.body || body;
   const updated = {
     ...existing,
     id,
@@ -2414,29 +2461,46 @@ app.patch('/catalog/items/:id', auth, requireSessionUser, (req, res) => {
     category: existing.category,
     updatedAt: new Date().toISOString(),
   };
-  if (body.name != null) updated.name = String(body.name).trim();
-  if (body.description != null) updated.description = String(body.description).trim();
-  if (body.subCategory != null) updated.subCategory = String(body.subCategory).trim();
-  if (body.price != null) updated.price = Number(body.price) || 0;
-  if (body.unit != null) updated.unit = String(body.unit).trim();
-  if (body.currency != null) updated.currency = String(body.currency);
-  if (body.images != null && Array.isArray(body.images)) {
-    updated.images = body.images.map(String);
+  if (mediaBody.name != null) updated.name = String(mediaBody.name).trim();
+  if (mediaBody.description != null) {
+    updated.description = String(mediaBody.description).trim();
   }
-  if (body.location != null && typeof body.location === 'object') {
-    updated.location = body.location;
+  if (mediaBody.subCategory != null) {
+    updated.subCategory = String(mediaBody.subCategory).trim();
   }
-  if (body.contactPhone != null) updated.contactPhone = String(body.contactPhone);
-  if (body.contactWhatsapp != null) updated.contactWhatsapp = String(body.contactWhatsapp);
-  if (body.condition != null) updated.condition = String(body.condition);
-  if (body.status != null) {
-    const st = String(body.status).trim();
+  if (mediaBody.price != null) updated.price = Number(mediaBody.price) || 0;
+  if (mediaBody.unit != null) updated.unit = String(mediaBody.unit).trim();
+  if (mediaBody.currency != null) updated.currency = String(mediaBody.currency);
+  if (mediaBody.images != null && Array.isArray(mediaBody.images)) {
+    updated.images = mediaBody.images.map(String);
+  }
+  if (Object.prototype.hasOwnProperty.call(mediaBody, 'detailMedia')) {
+    updated.detailMedia = mediaBody.detailMedia;
+    if (mediaBody.videoUrl != null) updated.videoUrl = mediaBody.videoUrl || '';
+    if (mediaBody.videoId != null) updated.videoId = mediaBody.videoId || '';
+  }
+  if (mediaBody.location != null && typeof mediaBody.location === 'object') {
+    updated.location = mediaBody.location;
+  }
+  if (mediaBody.contactPhone != null) {
+    updated.contactPhone = String(mediaBody.contactPhone);
+  }
+  if (mediaBody.contactWhatsapp != null) {
+    updated.contactWhatsapp = String(mediaBody.contactWhatsapp);
+  }
+  if (mediaBody.condition != null) {
+    updated.condition = String(mediaBody.condition);
+  }
+  if (mediaBody.status != null) {
+    const st = String(mediaBody.status).trim();
     if (st === 'active' || st === 'inactive') updated.status = st;
   }
-  if (body.stockQuantity !== undefined) {
-    updated.stockQuantity = marketplaceCommerce.normalizeStockQuantity(body.stockQuantity);
+  if (mediaBody.stockQuantity !== undefined) {
+    updated.stockQuantity = marketplaceCommerce.normalizeStockQuantity(
+      mediaBody.stockQuantity,
+    );
   }
-  if (body.inStock !== undefined && body.stockQuantity === undefined) {
+  if (mediaBody.inStock !== undefined && mediaBody.stockQuantity === undefined) {
     updated.inStock = body.inStock !== false;
     if (updated.inStock === false && updated.stockQuantity != null) {
       updated.stockQuantity = 0;
