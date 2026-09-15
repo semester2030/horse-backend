@@ -48,25 +48,46 @@ function extractServiceCoords(service) {
   });
 }
 
-function speciesCompatible(service, animalType) {
-  const apps = service.applicableSpecies;
-  if (apps == null || (Array.isArray(apps) && apps.length === 0)) return true;
-  const sp = String(animalType).toLowerCase();
+const CANONICAL_TRANSPORT_SPECIES = new Set(['horse', 'camel', 'falcon']);
+
+/**
+ * Normalize applicableSpecies for transport matching.
+ * Fail-closed: empty / missing / unknown → no match (never "all species").
+ * Explicit 'all' expands to horse+camel+falcon (legacy alias only when declared).
+ */
+function normalizeApplicableSpecies(apps) {
+  if (apps == null) return [];
+  let raw;
   if (Array.isArray(apps)) {
-    return apps
-      .map(String)
-      .map((s) => s.toLowerCase())
-      .some((s) => s === sp || s === 'all');
+    raw = apps.map(String);
+  } else {
+    raw = [String(apps)];
   }
-  const one = String(apps).toLowerCase();
-  return one === sp || one === 'all';
+  const out = new Set();
+  for (const item of raw) {
+    const s = String(item).trim().toLowerCase();
+    if (!s) continue;
+    if (s === 'all') {
+      for (const c of CANONICAL_TRANSPORT_SPECIES) out.add(c);
+      continue;
+    }
+    if (CANONICAL_TRANSPORT_SPECIES.has(s)) out.add(s);
+  }
+  return [...out];
+}
+
+function speciesCompatible(service, animalType) {
+  const normalized = normalizeApplicableSpecies(service?.applicableSpecies);
+  if (normalized.length === 0) return false;
+  const sp = String(animalType || '')
+    .trim()
+    .toLowerCase();
+  if (!CANONICAL_TRANSPORT_SPECIES.has(sp)) return false;
+  return normalized.includes(sp);
 }
 
 function supportedAnimalTypesOf(service) {
-  const apps = service.applicableSpecies;
-  if (Array.isArray(apps) && apps.length > 0) return apps.map(String);
-  if (apps != null && apps !== '') return [String(apps)];
-  return [];
+  return normalizeApplicableSpecies(service?.applicableSpecies);
 }
 
 function classifyProviderType(service, user) {
@@ -423,5 +444,6 @@ module.exports = {
   extractServiceCoords,
   parseLatLng,
   speciesCompatible,
+  normalizeApplicableSpecies,
   classifyProviderType,
 };

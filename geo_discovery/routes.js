@@ -96,9 +96,63 @@ function registerGeoDiscoveryRoutes(app, ctx) {
     next();
   });
 
+  function canonicalizeMapSpecies(raw) {
+    const allow = new Set(['horse', 'camel', 'falcon']);
+    const list = [];
+    const src = Array.isArray(raw)
+      ? raw
+      : raw != null && String(raw).trim()
+        ? [raw]
+        : [];
+    for (const item of src) {
+      const s = String(item).trim().toLowerCase();
+      if (s === 'all') {
+        for (const c of allow) {
+          if (!list.includes(c)) list.push(c);
+        }
+        continue;
+      }
+      if (allow.has(s) && !list.includes(s)) list.push(s);
+    }
+    return list;
+  }
+
+  /** Fail-closed: discover/clusters require ≥1 canonical species. Empty ≠ all. */
+  function requireCanonicalSpeciesOrEmptyResult(body) {
+    const filters =
+      body && typeof body.filters === 'object' && body.filters
+        ? { ...body.filters }
+        : {};
+    const species = canonicalizeMapSpecies(filters.species);
+    if (species.length === 0) {
+      return {
+        ok: true,
+        emptyBecauseNoSpecies: true,
+        response: {
+          mode: 'places',
+          places: [],
+          clusters: [],
+          totalMatched: 0,
+          meta: { speciesRequired: true, reason: 'missing_or_invalid_species' },
+        },
+      };
+    }
+    filters.species = species;
+    return {
+      ok: true,
+      emptyBecauseNoSpecies: false,
+      body: { ...(body || {}), filters },
+    };
+  }
+
   // Discover — viewport + filters + limit + cursor (server-authoritative)
   app.post('/geo/discover', (req, res) => {
-    const result = healThenDiscover(req.body || {});
+    const gated = requireCanonicalSpeciesOrEmptyResult(req.body || {});
+    if (gated.emptyBecauseNoSpecies) {
+      res.setHeader('X-GDE-Species', 'REQUIRED');
+      return res.json(gated.response);
+    }
+    const result = healThenDiscover(gated.body);
     if (!result.ok) {
       return res.status(result.status || 400).json({ message: result.message });
     }
@@ -109,6 +163,11 @@ function registerGeoDiscoveryRoutes(app, ctx) {
 
   // Clusters — explicit cluster mode
   app.post('/geo/clusters', (req, res) => {
+    const gated = requireCanonicalSpeciesOrEmptyResult(req.body || {});
+    if (gated.emptyBecauseNoSpecies) {
+      res.setHeader('X-GDE-Species', 'REQUIRED');
+      return res.json(gated.response);
+    }
     const heal = healMissingServicePlaces(store, syncAnyService);
     if (heal.healed > 0) {
       bumpCache();
@@ -118,7 +177,7 @@ function registerGeoDiscoveryRoutes(app, ctx) {
         /* ignore */
       }
     }
-    const result = engine.clustersOnly(store, req.body || {});
+    const result = engine.clustersOnly(store, gated.body);
     if (!result.ok) {
       return res.status(result.status || 400).json({ message: result.message });
     }

@@ -33,6 +33,7 @@ const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const roles = require('./account_roles');
 const detailMedia = require('./detail_media');
+const matchingEngine = require('./matching_engine');
 const { validateSheepListing } = require('./sheep_listing');
 const { registerAccountLifecycleRoutes } = require('./account_lifecycle');
 const {
@@ -2147,12 +2148,7 @@ app.get('/services', (req, res) => {
   if (providerId) list = list.filter(s => s.providerId === providerId);
   const sp = species != null ? String(species).trim().toLowerCase() : '';
   if (sp && sp !== 'all') {
-    list = list.filter((s) => {
-      const apps = s.applicableSpecies;
-      if (apps == null || (Array.isArray(apps) && apps.length === 0)) return true;
-      if (Array.isArray(apps)) return apps.includes(sp) || apps.includes('all');
-      return String(apps) === sp || String(apps) === 'all';
-    });
+    list = list.filter((s) => matchingEngine.speciesCompatible(s, sp));
   }
   res.json(list);
 });
@@ -2195,11 +2191,24 @@ app.post('/services', auth, requireSessionUser, (req, res) => {
   if (!mediaApplied.ok) {
     return res.status(400).json({ message: mediaApplied.message });
   }
+  const body = { ...mediaApplied.body };
+  if (serviceType === 'transportation') {
+    const species = matchingEngine.normalizeApplicableSpecies(
+      body.applicableSpecies,
+    );
+    if (species.length === 0) {
+      return res.status(400).json({
+        message:
+          'يجب تحديد نوع واحد على الأقل من الأنواع المنقولة (خيل / إبل / صقور)',
+      });
+    }
+    body.applicableSpecies = species;
+  }
   const serviceId = id();
   const service = {
     id: serviceId,
-    ...mediaApplied.body,
-    type: serviceType || mediaApplied.body?.type,
+    ...body,
+    type: serviceType || body?.type,
     providerId: req.authUserId,
     createdAt: new Date().toISOString(),
   };
@@ -2232,6 +2241,17 @@ app.patch('/services/:id', auth, requireSessionUser, (req, res) => {
     providerId: existing.providerId,
     updatedAt: new Date().toISOString(),
   };
+  const effectiveType = String(updated.type || existing.type || '').trim();
+  if (effectiveType === 'transportation') {
+    // If client sends applicableSpecies (including empty), normalize.
+    // Empty → kept empty (fail-closed discoverability) — do not invent species.
+    if (Object.prototype.hasOwnProperty.call(mediaApplied.body, 'applicableSpecies') ||
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'applicableSpecies')) {
+      updated.applicableSpecies = matchingEngine.normalizeApplicableSpecies(
+        updated.applicableSpecies,
+      );
+    }
+  }
   store.services.set(id, updated);
   const geo = indexServiceOnMap(updated);
   saveStore();
