@@ -62,6 +62,7 @@ const EDITABLE_PATCH_KEYS = Object.freeze([
   'pricedUnitCount',
   'tags',
   'thumbnailUrl',
+  'detailMedia',
   'hidden',
   'status',
   'updatedAt',

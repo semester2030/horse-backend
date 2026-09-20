@@ -1,0 +1,152 @@
+{
+  "services": [
+    {
+      "id": "vet_new_match",
+      "type": "veterinary",
+      "name": "عيادة جديدة مطابقة",
+      "latitude": 24.71,
+      "longitude": 46.67,
+      "specialties": ["جراحة"],
+      "offersHomeVisit": true,
+      "emergency": true,
+      "pricePerVisit": 120,
+      "verified": true,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "vet_new_nomatch",
+      "type": "veterinary",
+      "name": "عيادة جديدة غير مطابقة",
+      "latitude": 24.72,
+      "longitude": 46.68,
+      "specialties": ["تطعيم"],
+      "offersHomeVisit": false,
+      "emergency": false,
+      "pricePerVisit": 200,
+      "verified": false,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "vet_legacy_recoverable",
+      "type": "veterinary",
+      "name": "عيادة قديمة قابلة للاستعادة",
+      "latitude": 24.73,
+      "longitude": 46.69,
+      "specialties": ["جراحة", "فحص"],
+      "offersHomeVisit": true,
+      "pricePerVisit": 90,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "vet_legacy_unknown",
+      "type": "veterinary",
+      "name": "عيادة قديمة بلا homeVisit",
+      "latitude": 24.74,
+      "longitude": 46.7,
+      "specialties": ["فحص"],
+      "pricePerVisit": 80,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "train_new",
+      "type": "training",
+      "name": "تدريب جديد",
+      "latitude": 24.71,
+      "longitude": 46.67,
+      "pricePerSession": 150,
+      "verified": true,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "train_legacy_unknown_price",
+      "type": "training",
+      "name": "تدريب بلا سعر",
+      "latitude": 24.71,
+      "longitude": 46.67,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "stable_new",
+      "type": "stable",
+      "name": "إيواء جديد",
+      "latitude": 24.71,
+      "longitude": 46.67,
+      "availableSpaces": 5,
+      "pricePerDay": 80,
+      "spaceTypes": ["مكان عادي"],
+      "verified": true,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "stable_legacy",
+      "type": "stable",
+      "name": "إيواء قديم",
+      "latitude": 24.72,
+      "longitude": 46.68,
+      "availableSpaces": 2,
+      "pricePerDay": 120,
+      "spaceTypes": ["مكان فاخر (VIP)"],
+      "applicableSpecies": ["camel"]
+    }
+  ],
+  "catalogItems": [
+    {
+      "id": "feed_new_bersim",
+      "category": "feed",
+      "name": "برسيم جديد",
+      "subCategory": "برسيم",
+      "price": 80,
+      "location": { "lat": 24.71, "lng": 46.67 },
+      "inStock": true,
+      "verified": true,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "feed_new_shair",
+      "category": "feed",
+      "name": "شعير جديد",
+      "subCategory": "شعير",
+      "price": 60,
+      "location": { "lat": 24.72, "lng": 46.68 },
+      "inStock": true,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "feed_legacy_recoverable",
+      "category": "feed",
+      "name": "تبن قديم",
+      "subCategory": "تبن",
+      "price": 40,
+      "location": { "lat": 24.73, "lng": 46.69 },
+      "inStock": true,
+      "applicableSpecies": ["camel"]
+    },
+    {
+      "id": "feed_legacy_unknown",
+      "category": "feed",
+      "name": "علف بلا نوع",
+      "price": 55,
+      "location": { "lat": 24.74, "lng": 46.7 },
+      "inStock": true,
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "eq_new",
+      "category": "equipment",
+      "name": "مقطورة خيل",
+      "subCategory": "مقطورة خيل",
+      "price": 500,
+      "location": { "lat": 24.71, "lng": 46.67 },
+      "applicableSpecies": ["horse"]
+    },
+    {
+      "id": "eq_legacy_unknown",
+      "category": "equipment",
+      "name": "معدة بلا نوع",
+      "price": 300,
+      "location": { "lat": 24.72, "lng": 46.68 },
+      "applicableSpecies": ["camel"]
+    }
+  ],
+  "servicePlaces": []
+}

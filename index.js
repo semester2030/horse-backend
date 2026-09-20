@@ -3253,6 +3253,11 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
     videoOwnership.stripClientOwnershipFields(req.body || {}),
     {},
   );
+  const mediaApplied = detailMedia.applyDetailMediaToBody(body, { maxItems: 15 });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
+  const mediaBody = mediaApplied.body;
   const tagSpecies = heritageTypes.includes(bodyType)
     ? bodyType
     : String(req.body?.targetSpecies || 'horse');
@@ -3261,11 +3266,11 @@ app.post('/videos', auth, requireSessionUser, (req, res) => {
   const ownerUserId = videoOwnership.resolveCreateVideoUserId(req.authUserId);
   const video = {
     id: videoId,
-    ...body,
+    ...mediaBody,
     location: normalizedLocation,
     city: normalizedLocation?.city || req.body.city || '',
     ...(heritageTypes.includes(bodyType) ? { species: bodyType } : {}),
-    tags: heritageTB.sanitizeTags(body.tags, tagSpecies),
+    tags: heritageTB.sanitizeTags(mediaBody.tags, tagSpecies),
     badges: [],
     userId: ownerUserId,
     createdAt: new Date().toISOString(),
@@ -3325,15 +3330,20 @@ app.patch('/videos/:id', auth, requireSessionUser, (req, res) => {
   }
 
   const body = heritageTB.applyClientListingFields(picked.patch, existing);
+  const mediaApplied = detailMedia.applyDetailMediaToBody(body, { maxItems: 15 });
+  if (!mediaApplied.ok) {
+    return res.status(400).json({ message: mediaApplied.message });
+  }
+  const mediaBody = mediaApplied.body;
   const tagSpecies =
-    body.species ||
-    body.type ||
+    mediaBody.species ||
+    mediaBody.type ||
     existing.species ||
     existing.type ||
     'horse';
   const updated = {
     ...existing,
-    ...body,
+    ...mediaBody,
     id,
     userId: existing.userId,
     badges: Array.isArray(existing.badges) ? existing.badges : [],
@@ -3341,6 +3351,9 @@ app.patch('/videos/:id', auth, requireSessionUser, (req, res) => {
     hlsUrl: existing.hlsUrl,
     updatedAt: new Date().toISOString(),
   };
+  if (Object.prototype.hasOwnProperty.call(mediaBody, 'detailMedia')) {
+    updated.detailMedia = mediaBody.detailMedia;
+  }
   updated.tags = heritageTB.sanitizeTags(updated.tags, tagSpecies);
   store.videos.set(id, updated);
   saveStore();

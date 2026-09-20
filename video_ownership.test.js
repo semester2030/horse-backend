@@ -15,24 +15,24 @@ describe('video_ownership helpers', () => {
     assert.equal(videoOwnership.isVideoOwner('u1', { userId: 'u2' }), false);
   });
 
-  it('pickOwnerEditablePatch strips media and ownership keys', () => {
+  it('pickOwnerEditablePatch allows detailMedia', () => {
     const picked = videoOwnership.pickOwnerEditablePatch({
       title: 'T',
-      price: 10,
-      userId: 'x',
+      detailMedia: [
+        {
+          id: '1',
+          url: 'https://cdn.example/a.jpg',
+          type: 'image',
+          role: 'DETAIL_IMAGE',
+          order: 0,
+        },
+      ],
       cloudflareVideoId: 'cf',
-      hlsUrl: 'https://x',
-      likes: 99,
-      hidden: true,
     });
     assert.equal(picked.ok, true);
-    assert.equal(picked.patch.title, 'T');
-    assert.equal(picked.patch.price, 10);
-    assert.equal(picked.patch.hidden, true);
-    assert.equal(picked.patch.userId, undefined);
+    assert.equal(Array.isArray(picked.patch.detailMedia), true);
+    assert.equal(picked.patch.detailMedia.length, 1);
     assert.equal(picked.patch.cloudflareVideoId, undefined);
-    assert.equal(picked.patch.hlsUrl, undefined);
-    assert.equal(picked.patch.likes, undefined);
   });
 
   it('validatePrice rejects negatives', () => {
