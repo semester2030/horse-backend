@@ -6,13 +6,14 @@
 'use strict';
 
 const SELLER_STATUS_TRANSITIONS = {
+  placed: ['preparing', 'cancelled'],
   paid: ['preparing', 'cancelled'],
   preparing: ['shipped', 'cancelled'],
   shipped: ['delivered'],
 };
 
-const CUSTOMER_CANCEL_FROM = new Set(['paid', 'preparing']);
-const ADMIN_CANCEL_FROM = new Set(['paid', 'preparing', 'shipped']);
+const CUSTOMER_CANCEL_FROM = new Set(['placed', 'paid', 'preparing']);
+const ADMIN_CANCEL_FROM = new Set(['placed', 'paid', 'preparing', 'shipped']);
 
 /** حجز مخزون في السلة (مللي ثانية) */
 const HOLD_TTL_MS = 30 * 60 * 1000;
@@ -166,7 +167,15 @@ function validateCartLines(cartItems, catalogMap, opts = {}) {
       });
       continue;
     }
-    const unit = Number(product.price) || 0;
+    const unit = Number(product.price);
+    if (!Number.isFinite(unit) || unit <= 0) {
+      issues.push({
+        catalogItemId: id,
+        code: 'PRICE_MISSING',
+        message: `${product.name || id}: السعر غير صالح للشراء`,
+      });
+      continue;
+    }
     const imageUrl =
       Array.isArray(product.images) && product.images.length > 0
         ? product.images[0]
@@ -193,6 +202,23 @@ function canCustomerCancel(from) {
   return CUSTOMER_CANCEL_FROM.has(String(from || ''));
 }
 
+/** Cash is collected only after delivery, by an explicit seller action. */
+function assertCashCollection(order) {
+  if (String(order.status || '') === 'cancelled') {
+    return { ok: false, status: 400, message: 'لا يُحصّل طلب ملغى' };
+  }
+  if (String(order.paymentMethod || '') !== 'cash') {
+    return { ok: false, status: 400, message: 'هذا الطلب ليس دفعًا عند الاستلام' };
+  }
+  if (String(order.paymentStatus || '') !== 'unpaid') {
+    return { ok: false, status: 400, message: 'لا يوجد تحصيل معلّق على هذا الطلب' };
+  }
+  if (String(order.status || '') !== 'delivered') {
+    return { ok: false, status: 400, message: 'التحصيل بعد تسليم الطلب فقط' };
+  }
+  return { ok: true };
+}
+
 function canAdminTransition(from, to) {
   if (String(to) === 'cancelled') {
     return ADMIN_CANCEL_FROM.has(String(from || ''));
@@ -204,7 +230,7 @@ function shouldRestoreStock(previousStatus, nextStatus, stockDeducted) {
   if (!stockDeducted) return false;
   if (String(nextStatus) !== 'cancelled') return false;
   const prev = String(previousStatus || '');
-  return prev === 'paid' || prev === 'preparing' || prev === 'shipped';
+  return prev === 'placed' || prev === 'paid' || prev === 'preparing' || prev === 'shipped';
 }
 
 /**
@@ -275,6 +301,7 @@ module.exports = {
   validateCartLines,
   canSellerTransition,
   canCustomerCancel,
+  assertCashCollection,
   canAdminTransition,
   shouldRestoreStock,
   applyOrderStatusChange,

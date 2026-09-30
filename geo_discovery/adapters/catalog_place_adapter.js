@@ -24,7 +24,11 @@ function parseCoords(item) {
 function catalogItemToPlacePayload(item) {
   if (!item || typeof item !== 'object') return null;
   const status = String(item.status || 'active').toLowerCase();
-  if (status === 'inactive' || status === 'deleted' || status === 'removed') {
+  if (status === 'inactive' || status === 'deleted' || status === 'removed' || status === 'draft') {
+    return null;
+  }
+  // Store offers published from the video section stay off the services map.
+  if (String(item.listingChannel || '') === 'video_store') {
     return null;
   }
   const category = resolveCatalogCategory(item);

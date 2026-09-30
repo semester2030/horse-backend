@@ -56,6 +56,8 @@ const { registerEvidenceRoutes } = require('./evidence_routes');
 const { registerGeoDiscoveryRoutes } = require('./geo_discovery');
 const { createWsHub } = require('./ws_hub');
 const marketplaceCommerce = require('./marketplace_commerce');
+const storeOffer = require('./store_offer');
+const cartIntent = require('./cart_intent');
 const opsNotify = require('./ops_notify');
 const {
   initAuctionsModule,
@@ -231,6 +233,12 @@ const store = {
   idempotencyKeys: new Map(),
   /** مقاييس API */
   apiMetrics: { routes: {}, recent: [] },
+  /** محاولات نشر عروض المتاجر داخل الفيديو — userId::key */
+  storeOfferAttempts: new Map(),
+  /** محاولات تأكيد الطلب — userId::key → { orderIds } */
+  checkoutAttempts: new Map(),
+  /** إضافات سلة عُولجت — userId::clientMutationId */
+  cartMutations: new Map(),
   /** خبراء معتمدون */
   experts: new Map(),
   /** طلبات رأي خبير */
@@ -405,6 +413,15 @@ function applyStoreSnapshot(data, sourceLabel) {
   } else if (!store.contactLeads) {
     store.contactLeads = new Map();
   }
+  if (data.storeOfferAttempts && typeof data.storeOfferAttempts === 'object') {
+    store.storeOfferAttempts = new Map(Object.entries(data.storeOfferAttempts));
+  }
+  if (data.checkoutAttempts && typeof data.checkoutAttempts === 'object') {
+    store.checkoutAttempts = new Map(Object.entries(data.checkoutAttempts));
+  }
+  if (data.cartMutations && typeof data.cartMutations === 'object') {
+    store.cartMutations = new Map(Object.entries(data.cartMutations));
+  }
   ensureModerationStore(store);
   const catalogN = store.catalogItems.size;
   const videoN = store.videos.size;
@@ -462,6 +479,9 @@ function saveStore() {
       expertRequests: Object.fromEntries(store.expertRequests),
       expertRatings: Object.fromEntries(store.expertRatings),
       contactLeads: Object.fromEntries(store.contactLeads || []),
+      storeOfferAttempts: Object.fromEntries(store.storeOfferAttempts || []),
+      checkoutAttempts: Object.fromEntries(store.checkoutAttempts || []),
+      cartMutations: Object.fromEntries(store.cartMutations || []),
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
@@ -2579,55 +2599,16 @@ app.get('/cart', auth, requireSessionUser, (req, res) => {
 });
 
 app.post('/cart/items', auth, requireSessionUser, (req, res) => {
-  const { catalogItemId, quantity } = req.body || {};
-  const qty = Math.max(1, parseInt(quantity, 10) || 1);
-  const product = store.catalogItems.get(String(catalogItemId || ''));
-  if (!product || product.category !== 'supplies') {
-    return res.status(400).json({ message: 'المنتج غير موجود أو ليس من قسم الأدوات' });
-  }
-  if ((product.status || 'active') !== 'active' || product.inStock === false) {
-    return res.status(400).json({ message: 'المنتج غير متوفر' });
-  }
-  const cart = getOrCreateCart(req.authUserId);
-  const idx = cart.items.findIndex((l) => l.catalogItemId === product.id);
-  const currentQty = idx >= 0 ? cart.items[idx].quantity || 0 : 0;
-  const nextQty = currentQty + qty;
-  const avail = marketplaceCommerce.availableStock(product, {
-    forUserId: req.authUserId,
+  const result = cartIntent.addToCart({
+    store,
+    userId: req.authUserId,
+    body: req.body || {},
   });
-  if (avail < nextQty) {
-    const availLabel = avail === Number.POSITIVE_INFINITY ? null : avail;
-    return res.status(409).json({
-      message:
-        avail <= 0
-          ? 'المنتج نفذ من المخزون'
-          : `الكمية المتاحة ${availLabel} فقط`,
-      available: availLabel,
-      code: 'OUT_OF_STOCK',
-    });
+  if (!result.ok) {
+    return res.status(result.status).json({ message: result.message, code: result.code });
   }
-  const imageUrl =
-    Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : '';
-  const snapshot = {
-    name: product.name,
-    price: Number(product.price) || 0,
-    imageUrl,
-    sellerId: product.sellerId,
-    unit: product.unit || '',
-    subCategory: product.subCategory || '',
-  };
-  if (idx >= 0) {
-    cart.items[idx].quantity = nextQty;
-    cart.items[idx].snapshot = snapshot;
-  } else {
-    cart.items.push({ catalogItemId: product.id, quantity: qty, snapshot });
-  }
-  marketplaceCommerce.setCartHold(product, req.authUserId, nextQty);
-  store.catalogItems.set(product.id, product);
-  cart.updatedAt = new Date().toISOString();
-  store.carts.set(req.authUserId, cart);
   saveStore();
-  res.json(cart);
+  res.status(result.replay ? 200 : 200).json(result.cart);
 });
 
 app.patch('/cart/items/:catalogItemId', auth, requireSessionUser, (req, res) => {
@@ -2749,6 +2730,19 @@ app.get('/orders/:id', auth, requireSessionUser, (req, res) => {
 });
 
 app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
+  const checkoutKey = String(req.body?.idempotencyKey || '').trim();
+  if (checkoutKey) {
+    if (!store.checkoutAttempts) store.checkoutAttempts = new Map();
+    const previous = store.checkoutAttempts.get(`${req.authUserId}::${checkoutKey}`);
+    if (previous && Array.isArray(previous.orderIds)) {
+      const replayed = previous.orderIds
+        .map((orderId) => store.orders.get(orderId))
+        .filter(Boolean);
+      if (replayed.length > 0) {
+        return res.status(200).json({ orders: replayed, replay: true });
+      }
+    }
+  }
   const cart = getOrCreateCart(req.authUserId);
   if (!cart.items || cart.items.length === 0) {
     return res.status(400).json({ message: 'السلة فارغة' });
@@ -2821,9 +2815,9 @@ app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
       lines: orderLines,
       total: Math.round(total * 100) / 100,
       currency: 'SAR',
-      status: 'paid',
+      status: 'placed',
       paymentMethod: 'cash',
-      paymentStatus: 'completed',
+      paymentStatus: 'unpaid',
       stockDeducted: true,
       shippingAddress,
       trackingNumber: '',
@@ -2836,7 +2830,7 @@ app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
       sellerId,
       'طلب متجر جديد',
       `${orderLines.length} صنف · ${order.total} ر.س`,
-      { type: 'order', orderId, status: 'paid' },
+      { type: 'order', orderId, status: 'placed', paymentStatus: 'unpaid' },
     );
   }
 
@@ -2853,6 +2847,12 @@ app.post('/orders/checkout', auth, requireSessionUser, (req, res) => {
     items: [],
     updatedAt: new Date().toISOString(),
   });
+  if (checkoutKey) {
+    store.checkoutAttempts.set(`${req.authUserId}::${checkoutKey}`, {
+      orderIds: created.map((order) => order.id),
+      at: new Date().toISOString(),
+    });
+  }
   saveStore();
   res.status(201).json({ orders: created });
 });
@@ -2868,6 +2868,36 @@ app.patch('/orders/:id', auth, requireSessionUser, (req, res) => {
     return res.status(403).json({ message: 'غير مصرح' });
   }
   const body = req.body || {};
+  if (body.confirmCollection === true) {
+    if (!isSeller) {
+      return res.status(403).json({ message: 'تأكيد التحصيل للبائع فقط' });
+    }
+    if (body.status != null && String(body.status) !== existing.status) {
+      return res.status(400).json({ message: 'لا يُجمع تغيير الحالة مع التحصيل في الطلب نفسه' });
+    }
+    const collection = marketplaceCommerce.assertCashCollection(existing);
+    if (!collection.ok) {
+      return res.status(collection.status).json({ message: collection.message });
+    }
+    const collected = {
+      ...existing,
+      paymentStatus: 'collected',
+      collectedBy: sid,
+      collectedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.orders.set(id, collected);
+    if (existing.userId) {
+      notifyEvent(
+        existing.userId,
+        'تأكيد التحصيل',
+        'تم تحصيل مبلغ الطلب عند الاستلام',
+        { type: 'order', orderId: id, paymentStatus: 'collected' },
+      );
+    }
+    saveStore();
+    return res.json(collected);
+  }
   const nextStatus = body.status != null ? String(body.status) : null;
 
   if (!nextStatus) {
@@ -3212,6 +3242,27 @@ app.get('/videos', (req, res) => {
   res.json(list.map((v) => heritageTB.scrubItemTags(v)));
 });
 
+app.post('/videos/store-offers', auth, requireSessionUser, (req, res) => {
+  const roleErr = roles.assertVideoCreate(req.authUser, 'supplies');
+  if (roleErr) return res.status(403).json({ message: roleErr });
+  const verifyErr = roles.assertMerchantVerified(req.authUser);
+  if (verifyErr) return res.status(403).json({ message: verifyErr });
+  const result = storeOffer.publishStoreOffer({
+    store,
+    userId: req.authUserId,
+    body: req.body || {},
+    createId: id,
+  });
+  if (!result.ok) {
+    return res.status(result.status).json({
+      message: result.message,
+      ...(result.code ? { code: result.code } : {}),
+    });
+  }
+  saveStore();
+  return res.status(result.status).json(result.payload);
+});
+
 app.post('/videos', auth, requireSessionUser, (req, res) => {
   const serviceType = String(
     req.body?.serviceType || req.body?.serviceCategory || '',
@@ -3355,6 +3406,21 @@ app.patch('/videos/:id', auth, requireSessionUser, (req, res) => {
     updated.detailMedia = mediaBody.detailMedia;
   }
   updated.tags = heritageTB.sanitizeTags(updated.tags, tagSpecies);
+  if (Array.isArray(updated.primaryImages)) {
+    const imagesResult = storeOffer.sanitizePrimaryImages(updated.primaryImages);
+    if (!imagesResult.ok) {
+      return res.status(400).json({ message: imagesResult.message });
+    }
+    updated.primaryImages = imagesResult.images;
+  }
+  if (String(updated.offerChannel || '') === 'video_store') {
+    const images = Array.isArray(updated.primaryImages) ? updated.primaryImages : [];
+    const hlsOk = /^https:\/\//i.test(String(updated.hlsUrl || ''));
+    if (images.length === 0 && !hlsOk) {
+      return res.status(400).json({ message: 'العرض المنشور يحتاج وسيطًا رئيسيًا صالحًا' });
+    }
+  }
+  storeOffer.syncCommercialFromVideo(store, updated, picked.patch);
   store.videos.set(id, updated);
   saveStore();
   res.json(heritageTB.scrubItemTags(updated));
@@ -3791,6 +3857,22 @@ app.post('/messages', auth, requireSessionUser, (req, res) => {
   if (bodyText.length > maxLen) {
     return res.status(400).json({ message: `النص يتجاوز الحد (${maxLen} حرفاً)` });
   }
+  const contextType = req.body?.contextType != null ? String(req.body.contextType).trim() : '';
+  const contextId = req.body?.contextId != null ? String(req.body.contextId).trim() : '';
+  if (contextType && contextType !== 'video_offer') {
+    return res.status(400).json({ message: 'سياق الرسالة غير مدعوم' });
+  }
+  if (contextId.length > 120) {
+    return res.status(400).json({ message: 'معرف سياق الرسالة غير صالح' });
+  }
+  if (contextType === 'video_offer') {
+    const video = store.videos.get(contextId);
+    if (!video) return res.status(400).json({ message: 'العرض المرتبط بالرسالة غير موجود' });
+    const owner = String(video.userId || '');
+    if (to !== owner && fromUserId !== owner) {
+      return res.status(403).json({ message: 'الرسالة يجب أن تكون مع صاحب العرض' });
+    }
+  }
   const msg = {
     id: id(),
     fromUserId,
@@ -3798,6 +3880,7 @@ app.post('/messages', auth, requireSessionUser, (req, res) => {
     text: bodyText,
     createdAt: new Date().toISOString(),
     read: false,
+    ...(contextType ? { contextType, contextId } : {}),
   };
   if (!Array.isArray(store.messages)) store.messages = [];
   store.messages.push(msg);
