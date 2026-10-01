@@ -2400,9 +2400,26 @@ app.get('/catalog/items', auth, (req, res) => {
   res.json(list);
 });
 
-app.get('/catalog/items/:id', auth, (req, res) => {
+// Public read of active catalog items (store feed commerce check).
+// Optional Bearer: owners may still read their own non-active items.
+app.get('/catalog/items/:id', (req, res) => {
+  const h = req.headers.authorization;
+  const t = h && h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (t) req.token = t;
+
   const item = store.catalogItems.get(req.params.id);
-  if (!item) return res.status(404).json({ message: 'المنتج غير موجود' });
+  if (!item) {
+    return res.status(404).json({ message: 'المنتج غير موجود', code: 'NOT_FOUND' });
+  }
+  const status = String(item.status || 'active');
+  const viewer = viewerFromToken(req);
+  const viewerId = viewer ? String(viewer.id || '') : '';
+  const isOwner =
+    Boolean(viewerId) && String(item.sellerId || '') === viewerId;
+  if (status !== 'active' && !isOwner) {
+    // Same opaque 404 as missing — do not leak paused inventory to strangers.
+    return res.status(404).json({ message: 'المنتج غير موجود', code: 'NOT_FOUND' });
+  }
   const clientLat = parseFloat(req.query.lat);
   const clientLng = parseFloat(req.query.lng);
   const hasClientLoc = Number.isFinite(clientLat) && Number.isFinite(clientLng);
