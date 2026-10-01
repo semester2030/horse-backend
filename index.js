@@ -57,6 +57,10 @@ const { registerGeoDiscoveryRoutes } = require('./geo_discovery');
 const { createWsHub } = require('./ws_hub');
 const marketplaceCommerce = require('./marketplace_commerce');
 const storeOffer = require('./store_offer');
+const {
+  filterVideosByOwner,
+  paginateList,
+} = require('./videos_list_query');
 const cartIntent = require('./cart_intent');
 const opsNotify = require('./ops_notify');
 const {
@@ -3239,7 +3243,31 @@ app.get('/videos', (req, res) => {
   list = filterVideosForViewer(list, viewerFromToken(req));
   if (tag) list = list.filter((v) => heritageTB.itemHasTag(v, tag));
   if (badge) list = list.filter((v) => heritageTB.itemHasBadge(v, badge));
-  res.json(list.map((v) => heritageTB.scrubItemTags(v)));
+
+  // Store-scoped browsing: ownerId | sellerId | userId (same merchant key).
+  const ownerScope =
+    req.query.ownerId != null
+      ? String(req.query.ownerId)
+      : req.query.sellerId != null
+        ? String(req.query.sellerId)
+        : req.query.userId != null
+          ? String(req.query.userId)
+          : '';
+  if (ownerScope.trim()) {
+    list = filterVideosByOwner(list, ownerScope);
+  }
+
+  const page = paginateList(list, {
+    limit: req.query.limit,
+    offset: req.query.offset,
+  });
+  if (page.limit != null) {
+    res.set('X-Total-Count', String(page.total));
+    res.set('X-Has-More', page.hasMore ? '1' : '0');
+    res.set('X-Offset', String(page.offset));
+    res.set('X-Limit', String(page.limit));
+  }
+  res.json(page.items.map((v) => heritageTB.scrubItemTags(v)));
 });
 
 app.post('/videos/store-offers', auth, requireSessionUser, (req, res) => {
