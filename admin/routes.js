@@ -1107,59 +1107,6 @@ function createAdminRouter(ctx) {
     console.warn('[auctions] admin routes skip:', e.message);
   }
 
-  return router;
-}
-
-/** مسار رفع مستندات التحقق من التطبيق */
-function registerAppVerificationRoutes(app, ctx, auth, requireSessionUser) {
-  const upload = multer({
-    storage: multer.diskStorage({
-      destination: (req, file, cb) => {
-        const dir = path.join(ctx.verificationDir, req.authUserId);
-        fs.mkdirSync(dir, { recursive: true });
-        cb(null, dir);
-      },
-      filename: (req, file, cb) => {
-        cb(null, `${ctx.id()}${path.extname(file.originalname) || '.jpg'}`);
-      },
-    }),
-    limits: { fileSize: 15 * 1024 * 1024 },
-  });
-
-  app.post(
-    '/verification/documents',
-    auth,
-    requireSessionUser,
-    upload.single('file'),
-    (req, res) => {
-      if (!req.file) {
-        return res.status(400).json({ message: 'الملف مطلوب' });
-      }
-      const u = ctx.store.users.get(req.authUserId);
-      if (!u) return res.status(404).json({ message: 'المستخدم غير موجود' });
-      if (!MERCHANT_ROLES.includes(u.accountRole)) {
-        return res.status(400).json({ message: 'هذا الحساب لا يتطلب مستندات تحقق' });
-      }
-      const doc = {
-        id: ctx.id(),
-        type: String(req.body?.type || 'commercial_register'),
-        filename: req.file.originalname,
-        path: req.file.path,
-        sizeBytes: req.file.size,
-        mimeType: req.file.mimetype,
-        uploadedAt: new Date().toISOString(),
-      };
-      if (!Array.isArray(u.verificationDocuments)) u.verificationDocuments = [];
-      u.verificationDocuments.push(doc);
-      u.verificationStatus = 'pending';
-      u.verificationSubmittedAt = new Date().toISOString();
-      u.updatedAt = new Date().toISOString();
-      ctx.store.users.set(u.id, u);
-      ctx.saveStore();
-      res.status(201).json({ ok: true, document: { id: doc.id, type: doc.type, filename: doc.filename, sizeBytes: doc.sizeBytes } });
-    },
-  );
-
   // ========== PH-02 ProfessionalEntity admin (ownership) ==========
   router.get(
     '/professional-entities',
@@ -1310,6 +1257,59 @@ function registerAppVerificationRoutes(app, ctx, auth, requireSessionUser) {
           reason,
         },
       });
+    },
+  );
+
+  return router;
+}
+
+/** مسار رفع مستندات التحقق من التطبيق */
+function registerAppVerificationRoutes(app, ctx, auth, requireSessionUser) {
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => {
+        const dir = path.join(ctx.verificationDir, req.authUserId);
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      },
+      filename: (req, file, cb) => {
+        cb(null, `${ctx.id()}${path.extname(file.originalname) || '.jpg'}`);
+      },
+    }),
+    limits: { fileSize: 15 * 1024 * 1024 },
+  });
+
+  app.post(
+    '/verification/documents',
+    auth,
+    requireSessionUser,
+    upload.single('file'),
+    (req, res) => {
+      if (!req.file) {
+        return res.status(400).json({ message: 'الملف مطلوب' });
+      }
+      const u = ctx.store.users.get(req.authUserId);
+      if (!u) return res.status(404).json({ message: 'المستخدم غير موجود' });
+      if (!MERCHANT_ROLES.includes(u.accountRole)) {
+        return res.status(400).json({ message: 'هذا الحساب لا يتطلب مستندات تحقق' });
+      }
+      const doc = {
+        id: ctx.id(),
+        type: String(req.body?.type || 'commercial_register'),
+        filename: req.file.originalname,
+        path: req.file.path,
+        sizeBytes: req.file.size,
+        mimeType: req.file.mimetype,
+        uploadedAt: new Date().toISOString(),
+      };
+      if (!Array.isArray(u.verificationDocuments)) u.verificationDocuments = [];
+      u.verificationDocuments.push(doc);
+      u.verificationStatus = 'pending';
+      u.verificationSubmittedAt = new Date().toISOString();
+      u.updatedAt = new Date().toISOString();
+      ctx.store.users.set(u.id, u);
+      ctx.saveStore();
+      res.status(201).json({ ok: true, document: { id: doc.id, type: doc.type, filename: doc.filename, sizeBytes: doc.sizeBytes } });
     },
   );
 }
