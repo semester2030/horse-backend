@@ -64,6 +64,22 @@ function deleteUserAccount(store, userId, extras = {}) {
     }
   }
 
+  if (store.professionalEntities) {
+    for (const [eid, e] of store.professionalEntities.entries()) {
+      if (String(e.ownerUserId || '') === uid) {
+        store.professionalEntities.delete(eid);
+      }
+    }
+  }
+
+  if (store.imageAssets) {
+    for (const [aid, a] of store.imageAssets.entries()) {
+      if (String(a.ownerUserId || '') === uid) {
+        store.imageAssets.delete(aid);
+      }
+    }
+  }
+
   for (const [vid, v] of store.videos.entries()) {
     if (String(v.userId || v.ownerId || '') === uid) {
       store.videos.delete(vid);

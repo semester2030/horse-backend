@@ -174,6 +174,7 @@ const heritageTB = require('./heritage_tags_badges');
 const videoOwnership = require('./video_ownership');
 const videoMediaCleanup = require('./video_media_cleanup');
 const { createExpertsApi } = require('./experts');
+const { createProfessionalEntityApi } = require('./professional_entity');
 const otpRateLimit = require('./otp_rate_limit');
 
 function ensureDataMigrated() {
@@ -253,6 +254,10 @@ const store = {
   contactLeads: new Map(),
   /** GDE-02 Geo Discovery — ServicePlace index (generic; no vertical booking logic) */
   servicePlaces: new Map(),
+  /** PH-01 — هوية الجهة المهنية (ProfessionalEntity) */
+  professionalEntities: new Map(),
+  /** Cloudflare Images ownership registry — imageId → { ownerUserId, kind, createdAt } */
+  imageAssets: new Map(),
 };
 
 /** رموز OTP وإعداد الحساب (ذاكرة — تُعاد إرسالها عند الحاجة) */
@@ -402,6 +407,16 @@ function applyStoreSnapshot(data, sourceLabel) {
   } else {
     store.experts = new Map();
   }
+  if (data.professionalEntities && typeof data.professionalEntities === 'object') {
+    store.professionalEntities = new Map(Object.entries(data.professionalEntities));
+  } else {
+    store.professionalEntities = new Map();
+  }
+  if (data.imageAssets && typeof data.imageAssets === 'object') {
+    store.imageAssets = new Map(Object.entries(data.imageAssets));
+  } else {
+    store.imageAssets = new Map();
+  }
   if (data.expertRequests && typeof data.expertRequests === 'object') {
     store.expertRequests = new Map(Object.entries(data.expertRequests));
   } else {
@@ -482,6 +497,8 @@ function saveStore() {
       experts: Object.fromEntries(store.experts),
       expertRequests: Object.fromEntries(store.expertRequests),
       expertRatings: Object.fromEntries(store.expertRatings),
+      professionalEntities: Object.fromEntries(store.professionalEntities || []),
+      imageAssets: Object.fromEntries(store.imageAssets || []),
       contactLeads: Object.fromEntries(store.contactLeads || []),
       storeOfferAttempts: Object.fromEntries(store.storeOfferAttempts || []),
       checkoutAttempts: Object.fromEntries(store.checkoutAttempts || []),
@@ -668,6 +685,12 @@ app.use((req, res, next) => {
   next();
 });
 
+// PH-02 — Universal/App Link discovery + lightweight /s/:slug web fallback (before static)
+const {
+  registerProfessionalEntityWebRoutes,
+} = require('./professional_entity_web');
+registerProfessionalEntityWebRoutes(app, { store });
+
 // ملفات ثابتة (لوحة الإدارة القديمة + الجديدة)
 app.use(express.static(path.join(__dirname, 'public')));
 const adminConsoleDir = path.join(__dirname, 'public', 'admin-console');
@@ -817,6 +840,15 @@ const expertsApi = createExpertsApi({
   bookingOccupancy,
 });
 expertsApi.registerAppRoutes(app);
+
+const professionalEntityApi = createProfessionalEntityApi({
+  store,
+  saveStore,
+  id,
+  auth,
+  requireSessionUser,
+});
+professionalEntityApi.registerAppRoutes(app);
 
 function viewerFromToken(req) {
   const entry = store.accessTokens.get(req.token);
@@ -4156,8 +4188,8 @@ app.post('/media/stream/direct-upload', auth, async (req, res) => {
   }
 });
 
-/** جلسة رفع Cloudflare Images (V2 — جسم multipart) */
-app.post('/media/images/direct-upload', auth, async (req, res) => {
+/** جلسة رفع Cloudflare Images (V2 — جسم multipart) + تسجيل ملكية الأصل */
+app.post('/media/images/direct-upload', auth, requireSessionUser, async (req, res) => {
   const accountId = cfAccountId();
   const token = cfApiToken();
   if (!accountId || !token) {
@@ -4189,6 +4221,14 @@ app.post('/media/images/direct-upload', auth, async (req, res) => {
     if (!result?.uploadURL || !result?.id) {
       return res.status(502).json({ message: 'استجابة Cloudflare Images غير متوقعة' });
     }
+    // PH-01 closure: bind image id to authenticated owner before client uploads bytes
+    if (!store.imageAssets) store.imageAssets = new Map();
+    store.imageAssets.set(String(result.id), {
+      ownerUserId: String(req.authUserId),
+      kind: 'image',
+      createdAt: new Date().toISOString(),
+    });
+    saveStore();
     return res.json({
       uploadURL: result.uploadURL,
       id: result.id,
