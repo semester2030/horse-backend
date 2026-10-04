@@ -1159,6 +1159,159 @@ function registerAppVerificationRoutes(app, ctx, auth, requireSessionUser) {
       res.status(201).json({ ok: true, document: { id: doc.id, type: doc.type, filename: doc.filename, sizeBytes: doc.sizeBytes } });
     },
   );
+
+  // ========== PH-02 ProfessionalEntity admin (ownership) ==========
+  router.get(
+    '/professional-entities',
+    requireAdminAuth,
+    requirePerm('entities:admin'),
+    (req, res) => {
+      if (!ctx.store.professionalEntities) {
+        return res.json({ entities: [] });
+      }
+      const entities = [...ctx.store.professionalEntities.values()].map((e) => {
+        const owner = ctx.store.users.get(String(e.ownerUserId));
+        return {
+          entityId: e.id,
+          ownerUserId: e.ownerUserId,
+          publicSlug: e.publicSlug,
+          displayName: e.displayName,
+          publicationStatus: e.publicationStatus || 'draft',
+          version: e.version || 1,
+          city: e.city || '',
+          entityType: e.entityType || '',
+          hasLogo: Boolean(e.logoUrl),
+          createdAt: e.createdAt,
+          updatedAt: e.updatedAt,
+          ownerMeta: owner
+            ? {
+                accountRole: owner.accountRole || null,
+                name: owner.name || null,
+                emailHint: owner.email
+                  ? String(owner.email).replace(/(.{2}).+(@.+)/, '$1***$2')
+                  : null,
+                phoneHint: owner.phone
+                  ? `***${String(owner.phone).slice(-4)}`
+                  : null,
+              }
+            : null,
+        };
+      });
+      res.json({ entities });
+    },
+  );
+
+  router.post(
+    '/professional-entities/:entityId/transfer-owner',
+    requireAdminAuth,
+    requirePerm('entities:admin'),
+    (req, res) => {
+      const entityId = String(req.params.entityId || '');
+      const newOwnerUserId = String(req.body?.newOwnerUserId || '').trim();
+      const expectedVersion =
+        req.body?.version != null ? Number(req.body.version) : null;
+      const reason = String(req.body?.reason || 'NOMAS_OFFICIAL_ENTITY_ASSIGNMENT');
+
+      if (!entityId || !newOwnerUserId) {
+        return res.status(400).json({
+          message: 'entityId و newOwnerUserId مطلوبان',
+          code: 'INVALID_TRANSFER_BODY',
+        });
+      }
+      if (!ctx.store.professionalEntities) {
+        return res.status(404).json({
+          message: 'الجهة غير موجودة',
+          code: 'ENTITY_NOT_FOUND',
+        });
+      }
+      const entity = ctx.store.professionalEntities.get(entityId);
+      if (!entity) {
+        return res.status(404).json({
+          message: 'الجهة غير موجودة',
+          code: 'ENTITY_NOT_FOUND',
+        });
+      }
+      const newOwner = ctx.store.users.get(newOwnerUserId);
+      if (!newOwner) {
+        return res.status(404).json({
+          message: 'المالك الجديد غير موجود',
+          code: 'TARGET_OWNER_NOT_FOUND',
+        });
+      }
+      if (expectedVersion != null && Number(entity.version || 1) !== expectedVersion) {
+        return res.status(409).json({
+          message: 'تعارض إصدار الجهة — أعد التحميل',
+          code: 'VERSION_CONFLICT',
+          currentVersion: entity.version || 1,
+        });
+      }
+      if (String(entity.ownerUserId) === newOwnerUserId) {
+        return res.json({
+          ok: true,
+          unchanged: true,
+          entity: {
+            entityId: entity.id,
+            ownerUserId: entity.ownerUserId,
+            publicSlug: entity.publicSlug,
+            version: entity.version || 1,
+          },
+        });
+      }
+      for (const other of ctx.store.professionalEntities.values()) {
+        if (
+          String(other.id) !== entityId &&
+          String(other.ownerUserId) === newOwnerUserId
+        ) {
+          return res.status(409).json({
+            message: 'الحساب الهدف يملك جهة مهنية بالفعل',
+            code: 'TARGET_OWNER_ALREADY_HAS_ENTITY',
+            conflictingEntityId: other.id,
+          });
+        }
+      }
+
+      const oldOwnerUserId = String(entity.ownerUserId);
+      entity.ownerUserId = newOwnerUserId;
+      entity.updatedAt = new Date().toISOString();
+      entity.version = Number(entity.version || 1) + 1;
+      ctx.store.professionalEntities.set(entity.id, entity);
+      ctx.saveStore();
+
+      logAudit(ctx, {
+        actorType: 'admin',
+        actorId: req.adminUserId,
+        actorName: req.adminUser?.name || req.adminUser?.email || '',
+        action: 'professional_entity.transfer_owner',
+        entityType: 'ProfessionalEntity',
+        entityId: entity.id,
+        note: reason,
+        meta: {
+          oldOwnerUserId,
+          newOwnerUserId,
+          publicSlug: entity.publicSlug,
+          reason,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        entity: {
+          entityId: entity.id,
+          ownerUserId: entity.ownerUserId,
+          publicSlug: entity.publicSlug,
+          displayName: entity.displayName,
+          publicationStatus: entity.publicationStatus,
+          version: entity.version,
+        },
+        transfer: {
+          oldOwnerUserId,
+          newOwnerUserId,
+          performedBy: req.adminUserId,
+          reason,
+        },
+      });
+    },
+  );
 }
 
 module.exports = { createAdminRouter, registerAppVerificationRoutes, MERCHANT_ROLES };

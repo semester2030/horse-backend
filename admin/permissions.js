@@ -44,6 +44,8 @@ const ALL_PERMISSIONS = [
   'auctions:moderate',
   'auctions:ops',
   'auctions:disputes',
+  /** PH-02 — admin assignment of ProfessionalEntity ownership */
+  'entities:admin',
 ];
 
 const ROLE_PERMISSIONS = {
@@ -63,6 +65,7 @@ const ROLE_PERMISSIONS = {
     'auctions:moderate',
     'auctions:ops',
     'auctions:disputes',
+    // ownership transfer is super_admin-only (not listed here)
   ],
   [ADMIN_ROLES.verifier]: [
     'dashboard:read',
