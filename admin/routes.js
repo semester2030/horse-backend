@@ -1148,6 +1148,55 @@ function createAdminRouter(ctx) {
     },
   );
 
+  router.patch(
+    '/professional-entities/:entityId/publication',
+    requireAdminAuth,
+    requirePerm('entities:admin'),
+    (req, res) => {
+      const entityId = String(req.params.entityId || '');
+      const status = String(req.body?.publicationStatus || '').trim().toLowerCase();
+      if (!['draft', 'active', 'paused'].includes(status)) {
+        return res.status(400).json({
+          message: 'حالة النشر غير صالحة',
+          code: 'INVALID_PUBLICATION_STATUS',
+        });
+      }
+      const entity = ctx.store.professionalEntities?.get(entityId);
+      if (!entity) {
+        return res.status(404).json({
+          message: 'الجهة غير موجودة',
+          code: 'ENTITY_NOT_FOUND',
+        });
+      }
+      const prev = entity.publicationStatus || 'draft';
+      entity.publicationStatus = status;
+      entity.updatedAt = new Date().toISOString();
+      entity.version = Number(entity.version || 1) + 1;
+      ctx.store.professionalEntities.set(entity.id, entity);
+      ctx.saveStore();
+      logAudit(ctx, {
+        actorType: 'admin',
+        actorId: req.adminUserId,
+        actorName: req.adminUser?.name || req.adminUser?.email || '',
+        action: 'professional_entity.set_publication',
+        entityType: 'ProfessionalEntity',
+        entityId: entity.id,
+        note: `${prev}→${status}`,
+        meta: { previousStatus: prev, publicationStatus: status },
+      });
+      return res.json({
+        ok: true,
+        entity: {
+          entityId: entity.id,
+          ownerUserId: entity.ownerUserId,
+          publicSlug: entity.publicSlug,
+          publicationStatus: entity.publicationStatus,
+          version: entity.version,
+        },
+      });
+    },
+  );
+
   router.post(
     '/professional-entities/:entityId/transfer-owner',
     requireAdminAuth,
