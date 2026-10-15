@@ -10,6 +10,26 @@ const BIO_LONG_MAX = 2000;
 const CERT_MAX = 5;
 const privileged = require('./privileged_access');
 
+/**
+ * Fail-closed. Experts stay off unless EXPERTS_ENABLED is exactly "true".
+ * Missing, empty, or any other value keeps the service off.
+ * Re-enable only after an explicit owner approval. There is no schedule and no client switch.
+ * Do not roll this guard back by itself: a deploy without it would reopen public expert routes.
+ */
+function expertsFeatureEnabled() {
+  const raw = process.env.EXPERTS_ENABLED;
+  if (raw == null) return false;
+  return String(raw).trim().toLowerCase() === 'true';
+}
+
+function expertsAccessGuard(req, res, next) {
+  if (expertsFeatureEnabled()) return next();
+  return res.status(403).json({
+    code: 'FEATURE_DISABLED',
+    message: 'الخدمة غير متاحة حاليًا',
+  });
+}
+
 function ensureRatingsStore(store) {
   if (!store.expertRatings) store.expertRatings = new Map();
 }
@@ -160,6 +180,7 @@ function createExpertsApi({
     ratingStats,
 
     registerAppRoutes(app) {
+      app.use('/experts', expertsAccessGuard);
       app.get('/experts', (req, res) => {
         res.json(listApproved(req.query.species).map((e) => publicExpert(e)));
       });
@@ -590,4 +611,10 @@ function createExpertsApi({
   };
 }
 
-module.exports = { createExpertsApi, BIO_SHORT_MAX, BIO_LONG_MAX };
+module.exports = {
+  createExpertsApi,
+  BIO_SHORT_MAX,
+  BIO_LONG_MAX,
+  expertsFeatureEnabled,
+  expertsAccessGuard,
+};
